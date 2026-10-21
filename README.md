@@ -1,2 +1,3 @@
-# HandCaptcha
-ㅇㅅㅇ
+## HandCaptcha
+Implement Captcha as cv   
+Using hand.

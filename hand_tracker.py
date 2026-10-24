@@ -91,7 +91,9 @@ class MediaPipeFingertipDetector:
             )
 
         options = vision.HandLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=str(model_path)),
+            # Windows에서 MediaPipe(C++)가 한글 등 비ASCII 경로를 못 열기 때문에
+            # 경로 대신 파이썬에서 읽은 바이트를 넘긴다
+            base_options=BaseOptions(model_asset_buffer=model_path.read_bytes()),
             running_mode=vision.RunningMode.VIDEO,
             num_hands=1,
             min_hand_detection_confidence=config.min_detection_confidence,

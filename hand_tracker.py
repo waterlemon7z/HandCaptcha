@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, fields, replace
+from pathlib import Path
 from typing import Callable, Optional, Protocol
 
 Point = tuple[float, float]
@@ -64,6 +65,63 @@ class FingertipDetector(Protocol):
     def detect(self, frame, timestamp_ms: int) -> Optional[Point]:
         """정규화 좌표 (0~1, 좌우 반전 반영)를 돌려준다. 손이 없으면 None."""
         ...
+
+
+class MediaPipeFingertipDetector:
+    """MediaPipe Tasks API(HandLandmarker, VIDEO 모드)로 검지 끝(랜드마크 8번)을 찾는다.
+
+    mediapipe 1.x에는 예전 mp.solutions.hands가 없으므로 Tasks API와 .task 모델 파일을 쓴다.
+    """
+
+    INDEX_FINGER_TIP = 8
+
+    def __init__(self, config: HandConfig):
+        # mediapipe/cv2는 실제로 검출할 때만 필요하므로 여기서 import (단위 테스트는 없이도 동작)
+        import cv2
+        import mediapipe as mp
+        from mediapipe.tasks.python import BaseOptions, vision
+
+        model_path = Path(config.model_path)
+        if not model_path.is_absolute():
+            model_path = Path(__file__).resolve().parent / model_path
+        if not model_path.exists():
+            raise FileNotFoundError(
+                f"손 인식 모델 파일이 없습니다: {model_path}\n"
+                "python download_model.py 로 내려받으세요."
+            )
+
+        options = vision.HandLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=str(model_path)),
+            running_mode=vision.RunningMode.VIDEO,
+            num_hands=1,
+            min_hand_detection_confidence=config.min_detection_confidence,
+            min_hand_presence_confidence=config.min_presence_confidence,
+            min_tracking_confidence=config.min_tracking_confidence,
+        )
+        self._cv2 = cv2
+        self._mp = mp
+        self._landmarker = vision.HandLandmarker.create_from_options(options)
+        self._mirror = config.mirror
+        self._last_ts = -1
+
+    def detect(self, frame, timestamp_ms: int) -> Optional[Point]:
+        # VIDEO 모드는 타임스탬프가 반드시 증가해야 함
+        timestamp_ms = max(int(timestamp_ms), self._last_ts + 1)
+        self._last_ts = timestamp_ms
+
+        rgb = self._cv2.cvtColor(frame, self._cv2.COLOR_BGR2RGB)
+        image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
+        result = self._landmarker.detect_for_video(image, timestamp_ms)
+        if not result.hand_landmarks:
+            return None
+
+        tip = result.hand_landmarks[0][self.INDEX_FINGER_TIP]
+        # 프레임을 뒤집는 대신 x 좌표만 반전 (거울 화면 기준과 같음)
+        x = 1.0 - tip.x if self._mirror else tip.x
+        return (x, tip.y)
+
+    def close(self) -> None:
+        self._landmarker.close()
 
 
 class EMASmoother:
@@ -180,7 +238,23 @@ class HandTracker:
 
     def update(self, frame) -> HandState:
         """웹캠 프레임 한 장을 처리한다 (BGR, 좌우 반전하지 않은 원본)."""
-        raise NotImplementedError("MediaPipe 검출기 연결 전")
+        if self._detector is None:
+            self._detector = MediaPipeFingertipDetector(self.config)
+        t = self._clock()
+        norm_xy = self._detector.detect(frame, int(t * 1000))
+        return self.update_point(norm_xy, t)
+
+    def close(self) -> None:
+        """검출기 자원 해제."""
+        close = getattr(self._detector, "close", None)
+        if close is not None:
+            close()
+
+    def __enter__(self) -> "HandTracker":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
     def update_point(self, norm_xy: Optional[Point], t: Optional[float] = None) -> HandState:
         """정규화 손끝 좌표로 한 프레임을 처리한다.

@@ -17,6 +17,7 @@ PLACE_MARGIN = 0.14
 ANGLE_RANGE = (3.0, 6.0)            # 오른쪽 이미지 회전 각도(도), 부호는 랜덤
 EXTRA_SCALE_RANGE = (1.0, 1.05)     # 빈 모서리를 없애는 최소 배율에 추가로 곱하는 배율
 BLEND_LEVELS = 4                    # 피라미드 단계 상한 (작은 물체는 자동으로 줄임)
+BLEND_FEATHER_SIGMA = 2.0           # 블렌딩 마스크를 흐리는 정도(px). 0이면 alpha 그대로
 HIT_TOLERANCE_PX = 8                # 손끝 오차 허용: 판정할 때 정답 마스크를 넓히는 픽셀 수
 
 
@@ -36,6 +37,17 @@ def _hit(mask, point):
     x, y = _to_pixel(point)
     h, w = mask.shape
     return 0 <= x < w and 0 <= y < h and bool(mask[y, x] > 0)
+
+
+def blend_object(composite, bg, alpha, feather_sigma=BLEND_FEATHER_SIGMA):
+    """물체를 붙인 이미지를 배경과 라플라시안 피라미드로 섞는다."""
+    # 단계가 너무 많으면 작은 물체에 배경색이 번지므로 물체 크기에 맞춰 줄인다
+    _, _, ow, oh = cv2.boundingRect(np.where(alpha > 0.5, 255, 0).astype(np.uint8))
+    levels = max(1, min(BLEND_LEVELS, int(np.log2(max(2, min(ow, oh)) / 2))))
+    # alpha 그대로면 가장 세밀한 단계에서 경계가 그대로 복사되므로, 마스크를 흐려 경계 픽셀도 섞이게 한다
+    if feather_sigma > 0:
+        alpha = cv2.GaussianBlur(alpha, (0, 0), feather_sigma)
+    return pyramid_blend(composite, bg, alpha, levels)
 
 
 class ProblemGenerator:
@@ -104,10 +116,7 @@ class ProblemGenerator:
 
         composite, alpha = place_object(left, obj, rng, OBJECT_SCALE_RANGE, PLACE_MARGIN)
         mask_left = np.where(alpha > 0.5, 255, 0).astype(np.uint8)
-        # 단계가 너무 많으면 작은 물체에 배경색이 번지므로 물체 크기에 맞춰 줄인다
-        _, _, ow, oh = cv2.boundingRect(mask_left)
-        levels = max(1, min(BLEND_LEVELS, int(np.log2(max(2, min(ow, oh)) / 2))))
-        blended = pyramid_blend(composite, left, alpha, levels)
+        blended = blend_object(composite, left, alpha)
 
         M = random_affine(*OUTPUT_SIZE, rng, ANGLE_RANGE, EXTRA_SCALE_RANGE)
         right, mask = warp(blended, mask_left, M)

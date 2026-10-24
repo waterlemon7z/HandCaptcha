@@ -3,7 +3,7 @@
     python -m cv.test.problem_gen.preview --out <폴더> --seeds 0 1 2
 
 seed마다 [왼쪽 | 오른쪽 | 오른쪽 + 정답 영역] 이미지와,
-블렌딩 전후 비교(물체 주변 확대) 이미지를 저장한다.
+블렌딩 방식별 비교(물체 주변 확대) 이미지를 저장한다.
 """
 import argparse
 from pathlib import Path
@@ -14,7 +14,6 @@ import numpy as np
 from cv.problem_gen import ProblemGenerator
 from cv.problem_gen import generator as G
 from cv.problem_gen.assets import list_assets, read_image, read_object
-from cv.problem_gen.blending import pyramid_blend
 from cv.problem_gen.compose import fit_background, place_object
 
 
@@ -31,18 +30,26 @@ def save_problem(gen, seed, out):
 
 
 def save_blend_comparison(asset_dir, seed, out):
-    """같은 배치에서 alpha로만 붙인 결과와 피라미드 블렌딩 결과를 확대해 나란히 저장한다."""
+    """같은 배치에서 [alpha로만 붙임 | 블렌딩(마스크 그대로) | 블렌딩(마스크 흐림)]을 확대해 나란히 저장한다."""
     rng = np.random.default_rng(seed)
     backgrounds, objects = list_assets(asset_dir)
     bg = fit_background(read_image(backgrounds[rng.integers(len(backgrounds))]), G.OUTPUT_SIZE)
     obj = read_object(objects[rng.integers(len(objects))])
     composite, alpha = place_object(bg, obj, rng, G.OBJECT_SCALE_RANGE, G.PLACE_MARGIN)
-    blended = pyramid_blend(composite, bg, alpha, G.BLEND_LEVELS)
+    panels = {
+        "alpha only": composite,
+        "blend": G.blend_object(composite, bg, alpha, feather_sigma=0),
+        f"blend + feather {G.BLEND_FEATHER_SIGMA:g}px": G.blend_object(composite, bg, alpha),
+    }
 
     x, y, w, h = cv2.boundingRect(np.where(alpha > 0.5, 255, 0).astype(np.uint8))
     pad = 20
     crop = (slice(max(0, y - pad), y + h + pad), slice(max(0, x - pad), x + w + pad))
-    zoom = [cv2.resize(img[crop], None, fx=3, fy=3, interpolation=cv2.INTER_NEAREST) for img in (composite, blended)]
+    zoom = []
+    for label, img in panels.items():
+        img = cv2.resize(img[crop], None, fx=3, fy=3, interpolation=cv2.INTER_NEAREST)
+        cv2.putText(img, label, (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        zoom.append(img)
     cv2.imwrite(str(out / f"blend_{seed:03d}.png"), np.hstack(zoom))
 
 

@@ -255,6 +255,46 @@ def test_uses_clock_when_t_omitted():
     assert state.selected
 
 
+class FakeDetector:
+    """정해진 정규화 좌표를 차례로 돌려주는 가짜 검출기."""
+
+    def __init__(self, outputs):
+        self.outputs = list(outputs)
+        self.timestamps = []
+        self.closed = False
+
+    def detect(self, frame, timestamp_ms):
+        self.timestamps.append(timestamp_ms)
+        return self.outputs.pop(0)
+
+    def close(self):
+        self.closed = True
+
+
+def test_update_uses_injected_detector():
+    now = [0.0]
+
+    def clock():
+        now[0] += DT
+        return now[0]
+
+    det = FakeDetector([None] + [(0.25, 0.5)] * 40)
+    with make_tracker(detector=det, clock=clock) as tr:
+        states = [tr.update(frame=None) for _ in range(41)]
+    assert states[0].status == STATUS_NO_HAND
+    assert states[-1].selected
+    assert det.closed
+    assert det.timestamps == sorted(det.timestamps)
+
+
+def test_missing_model_file_gives_clear_error(tmp_path):
+    pytest.importorskip("mediapipe")
+    from hand_tracker import HandConfig, MediaPipeFingertipDetector
+
+    with pytest.raises(FileNotFoundError, match="download_model"):
+        MediaPipeFingertipDetector(HandConfig(model_path=str(tmp_path / "none.task")))
+
+
 def test_unknown_override_raises():
     with pytest.raises(TypeError):
         HandTracker((W, H), dwel_time=1.0)

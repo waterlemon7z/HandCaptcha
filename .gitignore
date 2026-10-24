@@ -1,0 +1,14 @@
+# 가상환경
+.venv/
+
+# 파이썬 캐시
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# MediaPipe 모델 파일 (download_model.py로 받음)
+models/*.task
+
+# 에디터
+.vscode/
+.idea/

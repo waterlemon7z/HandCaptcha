@@ -1,0 +1,7 @@
+# Python 3.12 기준 (mediapipe 1.1.1)
+mediapipe==1.1.1
+opencv-python==5.0.0.93
+# mediapipe가 의존성으로 함께 설치함. opencv-python과 버전이 다르면 cv2가 꼬이므로 같은 버전으로 고정
+opencv-contrib-python==5.0.0.93
+numpy==2.5.4
+pytest==9.1.1

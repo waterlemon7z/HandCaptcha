@@ -35,7 +35,8 @@ def save_blend_comparison(asset_dir, seed, out):
     backgrounds, objects = list_assets(asset_dir)
     bg = fit_background(read_image(backgrounds[rng.integers(len(backgrounds))]), G.OUTPUT_SIZE)
     obj = read_object(objects[rng.integers(len(objects))])
-    composite, alpha = place_object(bg, obj, rng, G.OBJECT_SCALE_RANGE, G.PLACE_MARGIN)
+    composite, alpha = place_object(bg, obj, rng, G.OBJECT_SCALE_RANGE, G.PLACE_MARGIN,
+                                    G.PLACE_CANDIDATES, G.PLACE_TOP_K)
     panels = {
         "alpha only": composite,
         "blend": G.blend_object(composite, bg, alpha, feather_sigma=0),

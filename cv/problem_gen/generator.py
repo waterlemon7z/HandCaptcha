@@ -14,6 +14,8 @@ OUTPUT_SIZE = (640, 480)            # (w, h). 배경은 가운데를 잘라 이 
 OBJECT_SCALE_RANGE = (0.15, 0.25)   # 물체 긴 변 / 배경 짧은 변
 # 아래 회전·확대 범위에서 물체가 프레임 밖으로 잘리지 않으려면 가장자리 여백이 0.13 이상 필요하다
 PLACE_MARGIN = 0.14
+PLACE_CANDIDATES = 100              # 위치 후보 수. 윤곽선이 적은(비어 있는) 자리일수록 점수가 높다
+PLACE_TOP_K = 3                     # 점수 상위 몇 개 중에서 랜덤으로 고를지. 1이면 같은 배경·물체에서 항상 같은 자리
 ANGLE_RANGE = (3.0, 6.0)            # 오른쪽 이미지 회전 각도(도), 부호는 랜덤
 EXTRA_SCALE_RANGE = (1.0, 1.05)     # 빈 모서리를 없애는 최소 배율에 추가로 곱하는 배율
 BLEND_LEVELS = 4                    # 피라미드 단계 상한 (작은 물체는 자동으로 줄임)
@@ -114,7 +116,8 @@ class ProblemGenerator:
         obj = read_object(self._objects[rng.integers(len(self._objects))])
         left = fit_background(bg, OUTPUT_SIZE)
 
-        composite, alpha = place_object(left, obj, rng, OBJECT_SCALE_RANGE, PLACE_MARGIN)
+        composite, alpha = place_object(left, obj, rng, OBJECT_SCALE_RANGE, PLACE_MARGIN,
+                                        PLACE_CANDIDATES, PLACE_TOP_K)
         mask_left = np.where(alpha > 0.5, 255, 0).astype(np.uint8)
         blended = blend_object(composite, left, alpha)
 

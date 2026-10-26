@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-from cv.problem_gen.compose import cover_scale, fit_background, random_affine, warp
+from cv.problem_gen.compose import cover_scale, fit_background, place_object, random_affine, warp
 
 
 def test_fit_background_crops_to_output_size():
@@ -31,3 +31,24 @@ def test_no_empty_corners_after_rotation():
         M = cv2.getRotationMatrix2D((319.5, 239.5), angle, cover_scale(angle, 640, 480))
         out = cv2.warpAffine(white, M, (640, 480), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         assert (out[1:-1, 1:-1] > 0).all()
+
+
+def test_place_object_prefers_empty_area():
+    # 왼쪽 60%는 빈 바닥, 오른쪽 40%는 물건 테두리가 빽빽한 배경
+    bg = np.full((480, 640, 3), 200, np.uint8)
+    for x in range(384, 640, 12):
+        cv2.line(bg, (x, 0), (x, 479), (30, 30, 30), 2)
+    obj = np.zeros((100, 100, 4), np.uint8)
+    cv2.circle(obj, (50, 50), 45, (0, 0, 255, 255), -1)
+    for seed in range(20):
+        _, alpha = place_object(bg, obj, np.random.default_rng(seed), (0.15, 0.25), 0.14, 30, 5)
+        assert not alpha[:, 384:].any(), seed
+
+
+def test_place_object_same_seed_same_position():
+    bg = cv2.GaussianBlur(np.random.default_rng(0).integers(0, 256, (480, 640, 3), dtype=np.uint8), (7, 7), 0)
+    obj = np.zeros((100, 100, 4), np.uint8)
+    cv2.circle(obj, (50, 50), 45, (0, 0, 255, 255), -1)
+    a1 = place_object(bg, obj, np.random.default_rng(4), (0.15, 0.25), 0.14, 30, 5)[1]
+    a2 = place_object(bg, obj, np.random.default_rng(4), (0.15, 0.25), 0.14, 30, 5)[1]
+    assert np.array_equal(a1, a2)

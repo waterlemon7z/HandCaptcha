@@ -1,8 +1,9 @@
-"""물체 배치와 오른쪽 이미지 변환."""
+"""물체 변형과 배치."""
 import cv2
 import numpy as np
 
-CLEARANCE_PX = 15  # 위치 점수를 볼 때 물체 둘레를 넓히는 픽셀 수
+CLEARANCE_PX = 15  # 물체 자리로 보는 범위를 물체 둘레로 넓히는 픽셀 수. 물체끼리도 이만큼 띄운다
+SURROUND_PX = 60   # 물체 주변으로 보는 고리의 바깥 반경(px)
 
 
 def fit_background(img, size):
@@ -26,60 +27,83 @@ def clutter_map(bg):
     return cv2.Canny(gray, 50, 150).astype(np.float32) / 255.0
 
 
-def place_object(bg, obj_bgra, rng, scale_range, margin, n_candidates=1, top_k=1):
-    """물체를 랜덤 크기로 배경의 빈 자리에 붙인다.
+def transform_object(obj_bgra, rng, long_side, angle_range):
+    """물체를 긴 변이 long_side(px)가 되게 줄이고, angle_range(도) 안의 랜덤 각도로 회전한다.
 
-    물체의 긴 변 = 배경 짧은 변 × scale_range 안의 값.
-    margin은 가장자리에서 띄울 비율로, 오른쪽 이미지를 확대·회전해도 물체가 잘리지 않게 한다.
-    위치는 후보 n_candidates개를 뽑아 물체가 덮을 자리의 윤곽선 밀도로 점수를 매기고,
-    가장 비어 있는 top_k개 중 하나를 고른다. 다른 물건 위에 겹쳐 놓이면 떠 보이기 때문이다.
+    회전해도 잘리지 않게 캔버스를 넓히며, 바깥은 투명(alpha 0)이다.
+    검수 쪽은 원본 물체 이미지로 찾으므로, 붙이는 모양을 원본과 다르게 만드는 단계다.
+    """
+    oh, ow = obj_bgra.shape[:2]
+    f = long_side / max(oh, ow)
+    # 투명 픽셀의 색은 의미가 없으므로 alpha를 곱해 둔 상태로 보간해야 테두리에 엉뚱한 색이 섞이지 않는다
+    a = obj_bgra[..., 3:].astype(np.float32) / 255.0
+    pm = np.dstack([obj_bgra[..., :3] * a, a[..., 0] * 255.0])
+    pm = cv2.resize(pm, (max(1, round(ow * f)), max(1, round(oh * f))),
+                    interpolation=cv2.INTER_AREA if f < 1 else cv2.INTER_LINEAR)
+
+    h, w = pm.shape[:2]
+    M = cv2.getRotationMatrix2D(((w - 1) / 2, (h - 1) / 2), rng.uniform(*angle_range), 1.0)
+    cos, sin = abs(M[0, 0]), abs(M[0, 1])
+    # 테두리 1px은 항상 투명하게 남겨, 회전한 모서리가 캔버스 끝에 걸리지 않게 한다
+    nw, nh = int(np.ceil(w * cos + h * sin)) + 2, int(np.ceil(w * sin + h * cos)) + 2
+    M[0, 2] += (nw - w) / 2
+    M[1, 2] += (nh - h) / 2
+    pm = cv2.warpAffine(pm, M, (nw, nh), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+
+    alpha = pm[..., 3:] / 255.0
+    rgb = np.where(alpha > 0, pm[..., :3] / np.maximum(alpha, 1e-6), 0)
+    return np.clip(np.rint(np.dstack([rgb, pm[..., 3]])), 0, 255).astype(np.uint8)
+
+
+def _dilated(alpha, pad, radius):
+    """alpha(uint8)를 사방 pad만큼 넓힌 캔버스에 놓고 radius(px)만큼 팽창한 0/1 float 지도."""
+    canvas = cv2.copyMakeBorder(alpha, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0)
+    k = 2 * radius + 1
+    return (cv2.dilate(canvas, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))) > 127).astype(np.float32)
+
+
+def place_object(bg, obj_bgra, rng, margin, n_candidates=1, top_k=1, occupied=None):
+    """크기·회전이 정해진 물체를, 자리는 비어 있고 주변은 복잡한 곳에 붙인다 (숨은그림찾기).
+
+    margin은 가장자리에서 띄울 비율이다.
+    위치는 후보 n_candidates개를 뽑아 점수를 매기고, 점수가 좋은 top_k개 중 하나를 고른다.
+    점수 = 3 × 물체 자리의 윤곽선 밀도 - 주변 고리의 윤곽선 밀도 (낮을수록 좋음).
+    자리에 윤곽선이 있으면 다른 물건 위에 떠 보이고, 주변이 비어 있으면 물체가 혼자 눈에 띄기 때문이다.
+    occupied(H×W bool)는 이미 놓은 물체 자리로, CLEARANCE_PX 안으로 겹치는 후보는 고르지 않고
+    주변의 복잡도로도 세지 않는다 (숨긴 물체끼리 모이지 않게).
     반환: (alpha로 합성한 이미지 uint8, 배경 크기의 alpha float32 0~1)
     """
     h, w = bg.shape[:2]
     oh, ow = obj_bgra.shape[:2]
-    f = rng.uniform(*scale_range) * min(h, w) / max(oh, ow)
-    ow, oh = max(1, round(ow * f)), max(1, round(oh * f))
-    obj = cv2.resize(obj_bgra, (ow, oh), interpolation=cv2.INTER_AREA if f < 1 else cv2.INTER_LINEAR)
-
     mx, my = int(w * margin), int(h * margin)
     xs = rng.integers(mx, w - mx - ow + 1, size=n_candidates)
     ys = rng.integers(my, h - my - oh + 1, size=n_candidates)
-    # 매끈한 물건은 안쪽에 윤곽선이 없으므로, 물체 둘레 바깥까지 넓혀서 다른 물건의 테두리가 걸리는지 본다
-    p = CLEARANCE_PX
-    footprint = cv2.dilate(cv2.copyMakeBorder(obj[..., 3], p, p, p, p, cv2.BORDER_CONSTANT, value=0),
-                           cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * p + 1, 2 * p + 1))) / 255.0
-    edges = cv2.copyMakeBorder(clutter_map(bg), p, p, p, p, cv2.BORDER_CONSTANT, value=0)
-    scores = [(edges[y:y + oh + 2 * p, x:x + ow + 2 * p] * footprint).sum() for x, y in zip(xs, ys)]
-    best = np.argsort(scores, kind="stable")[:top_k]
+
+    # 매끈한 물건은 안쪽에 윤곽선이 없으므로, 물체 자리도 둘레 CLEARANCE_PX까지 넓혀서 다른 물건의 테두리가 걸리는지 본다
+    r = SURROUND_PX
+    inner = _dilated(obj_bgra[..., 3], r, CLEARANCE_PX)
+    ring = _dilated(obj_bgra[..., 3], r, r) - inner
+    edges = clutter_map(bg)
+    if occupied is not None:
+        edges[occupied] = 0
+    edges = cv2.copyMakeBorder(edges, r, r, r, r, cv2.BORDER_CONSTANT, value=0)
+    windows = [edges[y:y + oh + 2 * r, x:x + ow + 2 * r] for x, y in zip(xs, ys)]
+    # 자리 쪽에 3배를 줘서, 빽빽한 곳 한가운데(둘 다 높음)나 물건에 걸친 자리가 빈 바닥보다 좋은 점수를 받지 않게 한다
+    scores = np.array([3 * (win * inner).sum() / inner.sum() - (win * ring).sum() / ring.sum() for win in windows])
+    if occupied is not None:
+        busy = cv2.copyMakeBorder(occupied.astype(np.uint8), r, r, r, r, cv2.BORDER_CONSTANT, value=0)
+        overlap = [(busy[y:y + oh + 2 * r, x:x + ow + 2 * r] * inner).any() for x, y in zip(xs, ys)]
+        scores[overlap] = np.inf
+    order = np.argsort(scores, kind="stable")
+    # 겹치지 않는 후보만 고른다. 모든 후보가 겹치는 경우는 사실상 없지만, 그때는 가장 나은 후보로 둔다
+    best = order[:max(1, min(top_k, int(np.isfinite(scores).sum())))]
     pick = best[rng.integers(len(best))]
     x0, y0 = int(xs[pick]), int(ys[pick])
 
     alpha = np.zeros((h, w), np.float32)
-    alpha[y0:y0 + oh, x0:x0 + ow] = obj[..., 3] / 255.0
+    alpha[y0:y0 + oh, x0:x0 + ow] = obj_bgra[..., 3] / 255.0
     fg = bg.astype(np.float32)
     # 투명 픽셀의 색은 의미가 없으므로 alpha로 먼저 섞어 테두리 색 번짐을 막는다
     a = alpha[y0:y0 + oh, x0:x0 + ow, None]
-    fg[y0:y0 + oh, x0:x0 + ow] = obj[..., :3] * a + fg[y0:y0 + oh, x0:x0 + ow] * (1 - a)
+    fg[y0:y0 + oh, x0:x0 + ow] = obj_bgra[..., :3] * a + fg[y0:y0 + oh, x0:x0 + ow] * (1 - a)
     return np.clip(np.rint(fg), 0, 255).astype(np.uint8), alpha
-
-
-def cover_scale(angle_deg, w, h):
-    """회전해도 프레임에 빈 모서리가 생기지 않는 최소 확대 배율."""
-    t = np.deg2rad(abs(angle_deg))
-    return np.cos(t) + max(w / h, h / w) * np.sin(t)
-
-
-def random_affine(w, h, rng, angle_range, extra_scale_range):
-    """이미지 중심 기준 회전·확대 행렬(2×3). 각도 부호는 랜덤."""
-    angle = rng.uniform(*angle_range) * rng.choice([-1, 1])
-    scale = cover_scale(angle, w, h) * rng.uniform(*extra_scale_range)
-    return cv2.getRotationMatrix2D(((w - 1) / 2, (h - 1) / 2), angle, scale)
-
-
-def warp(img, mask, M):
-    """이미지와 마스크에 같은 변환을 적용한다. 마스크는 0/255가 유지되게 최근접 보간."""
-    h, w = img.shape[:2]
-    # 확대로 빈 모서리는 없지만 반올림으로 생기는 가장자리 1픽셀을 위해 REFLECT
-    img_t = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
-    mask_t = cv2.warpAffine(mask, M, (w, h), flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-    return img_t, mask_t

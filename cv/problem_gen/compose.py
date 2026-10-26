@@ -2,6 +2,8 @@
 import cv2
 import numpy as np
 
+CLEARANCE_PX = 15  # 위치 점수를 볼 때 물체 둘레를 넓히는 픽셀 수
+
 
 def fit_background(img, size):
     """가운데를 잘라 size(w, h) 비율에 맞춘 뒤 크기를 맞춘다."""
@@ -18,11 +20,19 @@ def fit_background(img, size):
     return cv2.resize(img, size, interpolation=cv2.INTER_AREA)
 
 
-def place_object(bg, obj_bgra, rng, scale_range, margin):
-    """물체를 랜덤 크기·위치로 배경에 붙인다.
+def clutter_map(bg):
+    """배경의 윤곽선 지도(0/1 float). 다른 물건의 테두리에서 1이고, 빈 바닥이나 나뭇결처럼 약한 무늬는 0에 가깝다."""
+    gray = cv2.GaussianBlur(cv2.cvtColor(bg, cv2.COLOR_BGR2GRAY), (0, 0), 1.5)
+    return cv2.Canny(gray, 50, 150).astype(np.float32) / 255.0
+
+
+def place_object(bg, obj_bgra, rng, scale_range, margin, n_candidates=1, top_k=1):
+    """물체를 랜덤 크기로 배경의 빈 자리에 붙인다.
 
     물체의 긴 변 = 배경 짧은 변 × scale_range 안의 값.
     margin은 가장자리에서 띄울 비율로, 오른쪽 이미지를 확대·회전해도 물체가 잘리지 않게 한다.
+    위치는 후보 n_candidates개를 뽑아 물체가 덮을 자리의 윤곽선 밀도로 점수를 매기고,
+    가장 비어 있는 top_k개 중 하나를 고른다. 다른 물건 위에 겹쳐 놓이면 떠 보이기 때문이다.
     반환: (alpha로 합성한 이미지 uint8, 배경 크기의 alpha float32 0~1)
     """
     h, w = bg.shape[:2]
@@ -32,8 +42,17 @@ def place_object(bg, obj_bgra, rng, scale_range, margin):
     obj = cv2.resize(obj_bgra, (ow, oh), interpolation=cv2.INTER_AREA if f < 1 else cv2.INTER_LINEAR)
 
     mx, my = int(w * margin), int(h * margin)
-    x0 = int(rng.integers(mx, w - mx - ow + 1))
-    y0 = int(rng.integers(my, h - my - oh + 1))
+    xs = rng.integers(mx, w - mx - ow + 1, size=n_candidates)
+    ys = rng.integers(my, h - my - oh + 1, size=n_candidates)
+    # 매끈한 물건은 안쪽에 윤곽선이 없으므로, 물체 둘레 바깥까지 넓혀서 다른 물건의 테두리가 걸리는지 본다
+    p = CLEARANCE_PX
+    footprint = cv2.dilate(cv2.copyMakeBorder(obj[..., 3], p, p, p, p, cv2.BORDER_CONSTANT, value=0),
+                           cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * p + 1, 2 * p + 1))) / 255.0
+    edges = cv2.copyMakeBorder(clutter_map(bg), p, p, p, p, cv2.BORDER_CONSTANT, value=0)
+    scores = [(edges[y:y + oh + 2 * p, x:x + ow + 2 * p] * footprint).sum() for x, y in zip(xs, ys)]
+    best = np.argsort(scores, kind="stable")[:top_k]
+    pick = best[rng.integers(len(best))]
+    x0, y0 = int(xs[pick]), int(ys[pick])
 
     alpha = np.zeros((h, w), np.float32)
     alpha[y0:y0 + oh, x0:x0 + ow] = obj[..., 3] / 255.0

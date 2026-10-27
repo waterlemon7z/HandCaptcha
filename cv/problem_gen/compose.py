@@ -2,8 +2,9 @@
 import cv2
 import numpy as np
 
-CLEARANCE_PX = 15  # 물체 자리로 보는 범위를 물체 둘레로 넓히는 픽셀 수. 물체끼리도 이만큼 띄운다
-SURROUND_PX = 60   # 물체 주변으로 보는 고리의 바깥 반경(px)
+CLEARANCE_PX = 15        # 물체 자리로 보는 범위를 물체 둘레로 넓히는 픽셀 수. 물체끼리도 이만큼 띄운다
+SURROUND_PX = 60         # 물체 주변으로 보는 고리의 바깥 반경(px)
+FLOOR_COLOR_DIST = 20.0  # 바닥 색(Lab)과 이 거리 안이면 바닥으로 본다
 
 
 def fit_background(img, size):
@@ -25,6 +26,25 @@ def clutter_map(bg):
     """배경의 윤곽선 지도(0/1 float). 다른 물건의 테두리에서 1이고, 빈 바닥이나 나뭇결처럼 약한 무늬는 0에 가깝다."""
     gray = cv2.GaussianBlur(cv2.cvtColor(bg, cv2.COLOR_BGR2GRAY), (0, 0), 1.5)
     return cv2.Canny(gray, 50, 150).astype(np.float32) / 255.0
+
+
+def floor_map(bg):
+    """배경에서 가장 흔한 색(책상·바닥)과 비슷한 곳은 1, 사진 속 물건은 0인 지도(float 0~1).
+
+    밝기는 그림자·나뭇결로 크게 흔들리므로 색 차이의 절반만 반영한다.
+    흰 책상 위 흰 키보드처럼 바닥과 색이 같은 물건은 바닥으로 잡힌다.
+    """
+    lab = cv2.cvtColor(cv2.GaussianBlur(bg, (0, 0), 3), cv2.COLOR_BGR2LAB).astype(np.float32)
+    q = (lab // np.array([16, 8, 8], np.float32)).astype(np.int32)
+    key = (q[..., 0] * 32 + q[..., 1]) * 32 + q[..., 2]
+    values, counts = np.unique(key, return_counts=True)
+    ref = lab[key == values[np.argmax(counts)]].mean(axis=0)
+    dist = np.sqrt((((lab - ref) * np.array([0.5, 1, 1], np.float32)) ** 2).sum(-1))
+    mask = (dist < FLOOR_COLOR_DIST).astype(np.uint8) * 255
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    mask = cv2.morphologyEx(cv2.morphologyEx(mask, cv2.MORPH_OPEN, k), cv2.MORPH_CLOSE, k)
+    # 가려지는 경계가 계단처럼 보이지 않게 살짝 흐린다
+    return cv2.GaussianBlur(mask.astype(np.float32) / 255.0, (0, 0), 1.0)
 
 
 def transform_object(obj_bgra, rng, long_side, angle_range):
@@ -62,7 +82,7 @@ def _dilated(alpha, pad, radius):
     return (cv2.dilate(canvas, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))) > 127).astype(np.float32)
 
 
-def place_object(bg, obj_bgra, rng, margin, n_candidates=1, top_k=1, occupied=None):
+def place_object(bg, obj_bgra, rng, margin, n_candidates=1, top_k=1, occupied=None, floor=None, hidden_range=None):
     """크기·회전이 정해진 물체를, 자리는 비어 있고 주변은 복잡한 곳에 붙인다 (숨은그림찾기).
 
     margin은 가장자리에서 띄울 비율이다.
@@ -71,7 +91,9 @@ def place_object(bg, obj_bgra, rng, margin, n_candidates=1, top_k=1, occupied=No
     자리에 윤곽선이 있으면 다른 물건 위에 떠 보이고, 주변이 비어 있으면 물체가 혼자 눈에 띄기 때문이다.
     occupied(H×W bool)는 이미 놓은 물체 자리로, CLEARANCE_PX 안으로 겹치는 후보는 고르지 않고
     주변의 복잡도로도 세지 않는다 (숨긴 물체끼리 모이지 않게).
-    반환: (alpha로 합성한 이미지 uint8, 배경 크기의 alpha float32 0~1)
+    floor(floor_map 결과)와 hidden_range((최소, 최대) 비율)를 주면, 물체가 사진 속 물건 밑에
+    그 비율만큼 깔리는 후보만 고르고 바닥 위 부분만 그린다. 그런 후보가 없으면 가리지 않고 놓는다.
+    반환: (alpha로 합성한 이미지 uint8, 배경 크기의 alpha float32 0~1). alpha는 보이는 부분만이다.
     """
     h, w = bg.shape[:2]
     oh, ow = obj_bgra.shape[:2]
@@ -94,6 +116,14 @@ def place_object(bg, obj_bgra, rng, margin, n_candidates=1, top_k=1, occupied=No
         busy = cv2.copyMakeBorder(occupied.astype(np.uint8), r, r, r, r, cv2.BORDER_CONSTANT, value=0)
         overlap = [(busy[y:y + oh + 2 * r, x:x + ow + 2 * r] * inner).any() for x, y in zip(xs, ys)]
         scores[overlap] = np.inf
+    occlude = False
+    if floor is not None:
+        solid = obj_bgra[..., 3] > 127
+        hidden = np.array([1 - (floor[y:y + oh, x:x + ow][solid] > 0.5).mean() for x, y in zip(xs, ys)])
+        tucked = (hidden >= hidden_range[0]) & (hidden <= hidden_range[1])
+        occlude = bool((tucked & np.isfinite(scores)).any())
+        if occlude:
+            scores[~tucked] = np.inf
     order = np.argsort(scores, kind="stable")
     # 겹치지 않는 후보만 고른다. 모든 후보가 겹치는 경우는 사실상 없지만, 그때는 가장 나은 후보로 둔다
     best = order[:max(1, min(top_k, int(np.isfinite(scores).sum())))]
@@ -102,6 +132,9 @@ def place_object(bg, obj_bgra, rng, margin, n_candidates=1, top_k=1, occupied=No
 
     alpha = np.zeros((h, w), np.float32)
     alpha[y0:y0 + oh, x0:x0 + ow] = obj_bgra[..., 3] / 255.0
+    if occlude:
+        # 사진 속 물건 위에 걸친 부분은 그리지 않아, 그 물건 밑에 깔린 것처럼 보이게 한다
+        alpha[y0:y0 + oh, x0:x0 + ow] *= floor[y0:y0 + oh, x0:x0 + ow]
     fg = bg.astype(np.float32)
     # 투명 픽셀의 색은 의미가 없으므로 alpha로 먼저 섞어 테두리 색 번짐을 막는다
     a = alpha[y0:y0 + oh, x0:x0 + ow, None]

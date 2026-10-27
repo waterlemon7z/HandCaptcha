@@ -1,68 +1,47 @@
-"""숨은그림찾기 문제 생성과 정답 판정. 정답 영역은 문제가 끝나기 전에는 이 클래스 밖으로 나가지 않는다."""
+"""숨은그림찾기 문제 생성과 정답 판정. 정답 영역은 판정 전에는 이 클래스 밖으로 나가지 않는다."""
 import secrets
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
 
 from .assets import list_assets, read_image, read_object
 from .blending import pyramid_blend
-from .compose import fit_background, place_object, transform_object
+from .compose import fit_background, floor_map, place_object, transform_object
 
 OUTPUT_SIZE = (1280, 720)           # (w, h). 배경은 가운데를 잘라 이 크기로 맞춘다
-NUM_OBJECTS = 3                     # 문제마다 숨기는 물체 수
+NUM_OBJECTS = 3                     # 문제마다 합성하는 물체 수. 이 중 1개가 정답, 나머지는 방해용
 OBJECT_SCALE_RANGE = (0.10, 0.16)   # 물체 긴 변(회전 전) / 배경 짧은 변
 OBJECT_ANGLE_RANGE = (-45.0, 45.0)  # 물체 회전 각도(도)
 PLACE_MARGIN = 0.05                 # 가장자리에서 띄울 비율. 손으로 짚기 어려운 화면 끝을 피한다
 PLACE_CANDIDATES = 100              # 위치 후보 수. 자리는 비어 있고 주변은 복잡한 곳일수록 점수가 좋다
 PLACE_TOP_K = 3                     # 점수 상위 몇 개 중에서 랜덤으로 고를지. 1이면 같은 배경·물체에서 항상 같은 자리
+OCCLUDE_RANGE = (0.2, 0.45)         # 물체가 사진 속 물건 밑에 깔려 가려지는 비율 (최소, 최대)
 BLEND_LEVELS = 4                    # 피라미드 단계 상한 (작은 물체는 자동으로 줄임)
 BLEND_FEATHER_SIGMA = 2.0           # 블렌딩 마스크를 흐리는 정도(px). 0이면 alpha 그대로
-HIT_BOX_PX = 17                     # 판정 상자 한 변(px). 짚은 점(검수 박스는 그 중심)을 가운데에 둔다
-HIT_RATIO = 0.3                     # 판정 상자 중 정답 마스크 안에 든 비율이 이 이상이면 정답
+HIT_IOU = 0.5                       # 입력 박스와 정답 박스의 IoU가 이 이상이면 정답
 
 
 @dataclass
 class _Answer:
-    masks: list                               # 물체별 정답 마스크 (H×W, 0/255)
-    boxes: list                               # 물체별 (x1, y1, x2, y2). x2, y2는 박스 바로 바깥(슬라이스 끝)
-    found: set = field(default_factory=set)   # 지금까지 찾은 물체 번호
+    box: tuple          # 정답 물체의 보이는 부분 (x1, y1, x2, y2). x2, y2는 박스 바로 바깥(슬라이스 끝)
+    mask: np.ndarray    # 정답 물체의 보이는 부분 마스크 (H×W, 0/255). 결과 화면 하이라이트용
 
 
-def _to_pixel(point):
-    return int(round(float(point[0]))), int(round(float(point[1])))
+def _iou(a, b):
+    """두 박스 (x1, y1, x2, y2)의 IoU. 좌표 순서가 뒤집혀 들어와도 정렬해서 계산한다."""
+    ax1, ax2 = sorted((float(a[0]), float(a[2])))
+    ay1, ay2 = sorted((float(a[1]), float(a[3])))
+    bx1, bx2 = sorted((float(b[0]), float(b[2])))
+    by1, by2 = sorted((float(b[1]), float(b[3])))
+    inter = max(0.0, min(ax2, bx2) - max(ax1, bx1)) * max(0.0, min(ay2, by2) - max(ay1, by1))
+    union = (ax2 - ax1) * (ay2 - ay1) + (bx2 - bx1) * (by2 - by1) - inter
+    return inter / union if union > 0 else 0.0
 
 
-def _box_center(box):
-    x1, y1, x2, y2 = box
-    return (x1 + x2) / 2, (y1 + y2) / 2
-
-
-def _hit(mask, point):
-    """point를 가운데로 한 HIT_BOX_PX 상자 중 HIT_RATIO 이상이 마스크 안이면 정답. 이미지 밖은 마스크 밖으로 센다."""
-    x, y = _to_pixel(point)
-    r = HIT_BOX_PX // 2
-    region = mask[max(0, y - r):max(0, y + r + 1), max(0, x - r):max(0, x + r + 1)]
-    return bool(np.count_nonzero(region) >= HIT_RATIO * HIT_BOX_PX ** 2)
-
-
-def _match(masks, point, skip=()):
-    """point가 맞힌 물체 번호. skip에 든 물체는 보지 않는다. 없으면 None."""
-    for i, mask in enumerate(masks):
-        if i not in skip and _hit(mask, point):
-            return i
-    return None
-
-
-def _count_found(masks, boxes):
-    """검수 박스들로 찾은 물체 수. 박스가 어떤 물체인지는 모르므로 중심이 맞힌 물체를 하나씩 센다."""
-    found = set()
-    for box in boxes:
-        i = _match(masks, _box_center(box), found)
-        if i is not None:
-            found.add(i)
-    return len(found)
+def _hit(answer_box, box):
+    return _iou(answer_box, box) >= HIT_IOU
 
 
 def blend_object(composite, bg, alpha, feather_sigma=BLEND_FEATHER_SIGMA):
@@ -89,10 +68,10 @@ def blend_object(composite, bg, alpha, feather_sigma=BLEND_FEATHER_SIGMA):
 class ProblemGenerator:
     def __init__(self, asset_dir="assets", validator=None, max_attempts=5):
         """
-        validator(image, hints) -> [(x1, y1, x2, y2), ...] | None
-            정답을 모르는 자동 풀이 함수(ORB/SIFT 검수). 합성 이미지와 물체 원본 이미지들을 받아
-            찾은 영역들을 반환한다. 어떤 박스가 어떤 물체인지는 몰라도 된다.
-            물체를 모두 찾으면 문제를 다시 만들고, max_attempts번 모두 풀리면 마지막 문제를 그대로 발급한다.
+        validator(image, hint) -> [(x1, y1, x2, y2), ...] | None
+            정답을 모르는 자동 풀이 함수(ORB/SIFT 검수). 합성 이미지와 정답 물체의 원본 이미지를 받아
+            찾은 영역들을 반환한다. 그중 하나라도 정답이면 문제를 다시 만들고,
+            max_attempts번 모두 풀리면 마지막 문제를 그대로 발급한다.
         """
         self._backgrounds, self._objects = list_assets(asset_dir)
         if len(self._objects) < NUM_OBJECTS:
@@ -103,10 +82,10 @@ class ProblemGenerator:
         self._history = []
 
     def create(self, seed=None):
-        """새 문제를 만든다. 반환: (problem_id, image, hints).
+        """새 문제를 만든다. 반환: (problem_id, image, hint).
 
-        image: 물체를 숨긴 합성 이미지 (H×W×3 BGR)
-        hints: 숨긴 물체의 원본 이미지 리스트 (BGRA). 사용자에게 "이것들을 찾으세요"로 보여 준다
+        image: 물체 NUM_OBJECTS개를 숨긴 합성 이미지 (H×W×3 BGR)
+        hint: 정답 물체의 원본 이미지 (BGRA). 사용자에게 "이것을 찾으세요"로 보여 준다
         정답은 반환하지 않는다.
         """
         if seed is None:
@@ -115,13 +94,12 @@ class ProblemGenerator:
         rng = np.random.default_rng(seed)
         attempts = []
         for _ in range(self._max_attempts):
-            image, hints, answer = self._build(rng)
+            image, hint, answer = self._build(rng)
             if self._validator is None:
                 break
-            boxes = [tuple(int(round(float(v))) for v in b) for b in self._validator(image, hints) or []]
-            found = _count_found(answer.masks, boxes)
-            solved = found == len(answer.masks)
-            attempts.append({"boxes": boxes, "found": found, "solved": solved})
+            boxes = [tuple(int(round(float(v))) for v in b) for b in self._validator(image, hint) or []]
+            solved = any(_hit(answer.box, b) for b in boxes)
+            attempts.append({"boxes": boxes, "solved": solved})
             if not solved:
                 break
 
@@ -134,36 +112,17 @@ class ProblemGenerator:
                 "attempts": attempts,
                 "cap_reached": attempts[-1]["solved"],
             })
-        return problem_id, image, hints
+        return problem_id, image, hint
 
-    def solve(self, problem_id, point):
-        """point(합성 이미지 기준 (x, y))로 숨긴 물체 하나를 짚는다. 짚는 순서는 상관없다.
+    def solve(self, problem_id, box):
+        """box(합성 이미지 기준 (x1, y1, x2, y2))가 정답 물체의 박스와 HIT_IOU 이상 겹치면 정답.
 
-        - 아직 못 찾은 물체를 맞히면 correct=True. 모두 찾으면 문제가 끝난다.
-        - 이미 찾은 물체를 다시 짚으면 무시한다 (correct=False, 문제는 계속).
-        - 그 밖은 오답으로 문제가 끝난다.
-        끝난 문제는 폐기하고 전체 정답(answer_boxes, answer_masks)을 공개한다. box는 이번에 찾은 물체의 박스.
+        봇이든 사람이든 같은 기준이다. 한 번 판정한 문제는 폐기하고, 맞든 틀리든 정답을 공개한다.
         """
-        answer = self._answers.get(problem_id)
+        answer = self._answers.pop(problem_id, None)
         if answer is None:
-            return {"correct": False, "done": True, "found": 0, "box": None,
-                    "answer_boxes": None, "answer_masks": None}
-        i = _match(answer.masks, point, answer.found)
-        if i is not None:
-            answer.found.add(i)
-            done = len(answer.found) == len(answer.masks)
-        else:
-            done = _match(answer.masks, point) is None
-        if done:
-            del self._answers[problem_id]
-        return {
-            "correct": i is not None,
-            "done": done,
-            "found": len(answer.found),
-            "box": None if i is None else answer.boxes[i],
-            "answer_boxes": answer.boxes if done else None,
-            "answer_masks": answer.masks if done else None,
-        }
+            return {"correct": False, "answer_box": None, "answer_mask": None}
+        return {"correct": _hit(answer.box, box), "answer_box": answer.box, "answer_mask": answer.mask}
 
     @property
     def history(self):
@@ -171,29 +130,29 @@ class ProblemGenerator:
         return list(self._history)
 
     def auto_solve_rate(self):
-        """발급한 문제 중 validator가 첫 시도에 (물체를 모두 찾아) 푼 비율. 기록이 없으면 None."""
+        """발급한 문제 중 validator가 첫 시도에 정답을 찾은 비율. 기록이 없으면 None."""
         if not self._history:
             return None
         return sum(h["attempts"][0]["solved"] for h in self._history) / len(self._history)
 
     def _build(self, rng):
         bg = read_image(self._backgrounds[rng.integers(len(self._backgrounds))])
-        hints = [read_object(self._objects[i]) for i in rng.choice(len(self._objects), NUM_OBJECTS, replace=False)]
+        objects = [read_object(self._objects[i]) for i in rng.choice(len(self._objects), NUM_OBJECTS, replace=False)]
         image = fit_background(bg, OUTPUT_SIZE)
+        floor = floor_map(image)
 
         occupied = np.zeros(image.shape[:2], bool)
         masks = []
-        for obj in hints:
+        for obj in objects:
             long_side = rng.uniform(*OBJECT_SCALE_RANGE) * min(OUTPUT_SIZE)
             placed = transform_object(obj, rng, long_side, OBJECT_ANGLE_RANGE)
-            composite, alpha = place_object(image, placed, rng, PLACE_MARGIN, PLACE_CANDIDATES, PLACE_TOP_K, occupied)
+            composite, alpha = place_object(image, placed, rng, PLACE_MARGIN, PLACE_CANDIDATES, PLACE_TOP_K, occupied,
+                                            floor, OCCLUDE_RANGE)
             image = blend_object(composite, image, alpha)
             mask = np.where(alpha > 0.5, 255, 0).astype(np.uint8)
             occupied |= mask > 0
             masks.append(mask)
 
-        boxes = []
-        for mask in masks:
-            x, y, w, h = cv2.boundingRect(mask)
-            boxes.append((x, y, x + w, y + h))
-        return image, hints, _Answer(masks, boxes)
+        i = int(rng.integers(NUM_OBJECTS))
+        x, y, w, h = cv2.boundingRect(masks[i])
+        return image, objects[i], _Answer((x, y, x + w, y + h), masks[i])

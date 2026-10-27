@@ -1,135 +1,134 @@
-# HandCAPTCHA – 손 인식 모듈
+# 손인식 모듈 (HandTracker)
 
-웹캠에서 검지 끝을 추적해서 **문제 캔버스 좌표**로 바꾸고,
-EMA 스무딩 → dwell(머무르기) 선택 → 궤적 기록까지 처리하는 모듈입니다.
+카메라 프레임에서 손을 찾아 **문제 이미지(1280×720) 좌표**로 바꾸고,
+**주먹을 쥐면 기록 시작 → 손을 움직임 → 1초 멈추면 완료**하여
+**움직인 경로**(`trajectory`)와 **마지막에 멈춘 위치**(`stop_position`)를 따로 돌려준다.
 
 | 파일 | 내용 |
 |---|---|
-| `hand_tracker.py` | 모듈 본체 (`HandTracker`, `HandConfig`, `HandState`) |
-| `mock_captcha.py` | 연결 테스트용 `MockCaptcha` (실제 `Captcha`와 같은 `create`/`solve` 형태) |
-| `demo_hand.py` | OpenCV 창 데모 (웹캠 또는 마우스) |
-| `download_model.py` | MediaPipe 손 모델 파일 다운로드 |
-| `tests/` | 웹캠 없이 돌아가는 단위 테스트 (pytest) |
-
-다른 모듈과 의존 관계가 없어서 위 파일을 팀 저장소에 그대로 옮기면 됩니다.
+| `hand_tracker.py` | `HandTracker` 클래스와 결과 `HandResult` |
+| `demo.py` | 웹캠 데모 |
+| `download_model.py` | MediaPipe 손 모델 다운로드 |
+| `tests/` | 카메라 없이 돌아가는 테스트 |
+| `docs/decisions.md` | 정한 기준과 이유 |
 
 ## 설치
 
-Python **3.12**가 기준입니다. mediapipe 1.1.1과 OpenCV 5.0으로 확인했습니다.
+Python 3.12 기준이다. mediapipe 1.1.1은 Python 3.9~3.14를 지원한다.
 
 ```bash
 py -3.12 -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-python download_model.py        # models/hand_landmarker.task (약 7.5MB)
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe download_model.py
 ```
 
-> mediapipe가 `opencv-contrib-python`을 함께 설치합니다. `opencv-python`과 버전이 다르면
-> `cv2`가 꼬일 수 있어서 `requirements.txt`에서 두 패키지를 같은 버전으로 고정했습니다.
+> mediapipe 1.x에는 예전 `mp.solutions.hands`가 없어서 Tasks API(`HandLandmarker`)와
+> 모델 파일 `models/hand_landmarker.task`(약 7.8MB)를 쓴다.
 
-> mediapipe 1.x에는 예전 `mp.solutions.hands`가 **없습니다**.
-> 이 모듈은 Tasks API(`mediapipe.tasks.python.vision.HandLandmarker`, VIDEO 모드)를 쓰고,
-> 그래서 `.task` 모델 파일이 필요합니다.
-
-## 실행
+## 데모 실행
 
 ```bash
-python demo_hand.py              # 웹캠
-python demo_hand.py --mouse      # 웹캠/모델 없이 마우스로 테스트
-python demo_hand.py --smoothing 0.3 --dwell-radius 40 --dwell-time 1.2
-python -m pytest                 # 단위 테스트
+.venv\Scripts\python.exe demo.py
 ```
 
-데모 키: `n` 다음 문제, `r` 다시 하기, `q`/`ESC` 종료.
-선택하면 3초 뒤 자동으로 다음 문제로 넘어갑니다.
+- 손을 펴서 보이면 문제 이미지 위에 커서가 나온다 (회색 = idle).
+- **주먹**을 쥐면 기록이 시작된다 (주황색). 기록 중에는 손을 펴도 된다.
+- 찾을 대상으로 손을 옮겨 **1초 멈추면** 완료된다. 멈춘 위치에 초록 원과 십자 표시가 나온다.
+- 이동 경로는 화면에 그리지 않는다. 완료되면 `recordings/`에 두 파일을 따로 저장한다.
+  - `path_날짜_시각.csv` (열 `t,x,y`): 기록 시작부터 완료까지 움직인 경로 전체
+  - `stop_날짜_시각.csv` (열 `x,y`): 마지막에 멈춘 위치 한 점
+- 완료되면 그 상태로 멈춰 있다. 화면 아래 **다시하기** 버튼을 클릭하거나 `r`을 누르면 처음부터 다시 한다.
+- `q` 종료
+- `samples/problem.png`, `samples/hint.png`가 있으면 그 이미지를 쓰고, 없으면 임시 이미지를 만든다.
 
-## 좌표 기준
+## 테스트
 
+```bash
+.venv\Scripts\python.exe -m pytest
 ```
-캔버스 (2W + gap) × H
-┌──────────┬───┬──────────┐
-│  왼쪽    │gap│  오른쪽  │   W × H = 문제 이미지 원본 크기
-│ (0,0)~   │   │ (W+gap,0)~│
-└──────────┴───┴──────────┘
-```
-
-- **캔버스 좌표**: 좌우 이미지를 원본 크기 그대로 가로로 붙인 화면 기준 픽셀입니다.
-  `HandState.point`와 궤적이 이 좌표를 씁니다.
-  GUI에서 캔버스를 확대/축소해 표시한다면 그리기 직전에 배율만 곱하면 됩니다.
-- **원본 이미지 좌표**: `HandState.answer`. 짚은 쪽 이미지 기준 `(x, y)` 정수이고,
-  `HandState.side`(`"left"`/`"right"`)가 어느 쪽인지 알려 줍니다. 오른쪽이면 x에서 `W + gap`을 뺀 값입니다.
-  gap 위를 짚으면 가까운 쪽 이미지 가장자리로 붙입니다.
-- **카메라 → 캔버스**: 좌우 반전(거울)한 뒤, 카메라 중앙 활성 영역(기본 85%)을 캔버스 전체에 늘립니다.
-  손끝이 카메라 가장자리까지 가지 않아도 캔버스 끝에 닿게 하려는 것입니다.
 
 ## 인터페이스
+
+### 입력
+| 이름 | 형식 | 설명 |
+|---|---|---|
+| `frame` | `np.ndarray` BGR | 카메라 프레임 (CV 입력 클래스가 줌). 손 검출은 이것으로만 한다 |
+| `problem_img` | `np.ndarray` BGR, 1280×720 | 사용자가 손으로 정답 영역을 지정하는 이미지 |
+| `hint_img` | `np.ndarray` BGR, 크기 자유 | 찾을 대상을 보여 주는 작은 이미지. 표시만 하고 판정에는 안 씀 |
+
+원본 배열은 수정하지 않는다.
+
+### 출력 `HandResult` (dataclass)
+| 필드 | 형식 | 설명 |
+|---|---|---|
+| `position` | `(x, y)` 또는 `None` | 손바닥 중심 좌표. 손이 없거나 문제 이미지 밖이면 `None` |
+| `hand_status` | `"none"` / `"open"` / `"fist"` | 손 모양 |
+| `state` | `"idle"` / `"recording"` / `"done"` | 기록 상태 |
+| `trajectory` | `np.ndarray (N, 2)` int32 | 기록 시작(주먹)부터 지금(또는 완료)까지의 궤적 전체, 각 행이 `(x, y)`. 길이 제한 없음 |
+| `timestamps` | `np.ndarray (N,)` | 각 점의 시각(초), 기록 시작 = 0. 진위검출용 |
+| `stop_position` | `(x, y)` 또는 `None` | `state == "done"`일 때만. **마지막에 멈춘 위치** = 멈춤 판정에 쓴 최근 1초 동안 점들의 평균 |
+| `box` | `(x1, y1, x2, y2)` 또는 `None` | `state == "done"`일 때만. **경로 전체**를 감싸는 사각형. 항상 `x1 < x2`, `y1 < y2`, 이미지 안. 화면에는 그리지 않음 |
+
+**좌표는 모두 문제 이미지 기준**(x 0~1279, y 0~719)이다.
+
+### 상태 전환
+```
+idle ──(문제 이미지 안에서 주먹)──▶ recording ──(최근 1초 이동 범위 < 15px)──▶ done
+  ▲                                     │                                      │
+  └──(손이 0.5초 이상 안 보이거나 문제 이미지 밖)┘                             │
+  └─────────────────────────────── reset() ◀──────────────────────────────────┘
+```
+
+### 화면 `render(result)`
+`(720, 1280 + 320, 3)` BGR 이미지를 돌려준다.
+- 왼쪽 1280×720: 문제 이미지 + 손 커서, 상태 글자, 완료 시 멈춘 위치 표시(초록 원·십자).
+  궤적 선과 경로 box는 그리지 않는다.
+- 오른쪽 320px: 힌트 패널 ("찾을 대상" 글자 + 비율 유지해 가운데 배치한 힌트 이미지).
+  **어떤 오버레이도 그리지 않으며 항상 원본 그대로다.** 손이 힌트 패널 쪽으로 가면 무시한다.
+
+## 통합 클래스에서 쓰는 예
 
 ```python
 from hand_tracker import HandTracker
 
-tracker = HandTracker((W, H), gap=20, smoothing=0.4, dwell_radius=30, dwell_time=1.0)
+tracker = HandTracker(problem_img, hint_img)     # 문제 하나당 하나 (또는 set_images로 교체)
 
 while True:
-    ok, frame = cap.read()            # 웹캠 원본 BGR 프레임 (반전하지 말 것)
-    state = tracker.update(frame)     # 매 프레임
+    frame = camera.read()                         # CV 입력 클래스가 주는 BGR 프레임
+    result = tracker.process(frame)
+    cv2.imshow("HandCAPTCHA", tracker.render(result))   # 또는 GUI에 맞게 표시
 
-    # GUI: 커서와 게이지
-    #   state.point     -> (x, y) 캔버스 좌표 또는 None
-    #   state.progress  -> 0.0 ~ 1.0
-    #   state.status    -> "NO_HAND" / "TRACKING" / "DWELLING" / "SELECTED"
+    if result.state == "done":
+        stop = result.stop_position               # (x, y) 마지막에 멈춘 위치 → 정답 판정
+        path_box = result.box                     # (x1, y1, x2, y2) 경로 전체 범위 (필요하면)
+        trajectory = result.trajectory            # (N, 2) 움직인 경로 → 진위검출
+        times = result.timestamps                 # (N,)  → 진위검출
+        break
 
-    if state.selected:
-        ok = captcha.solve(img_hash, state.answer)      # answer = (x, y) 원본 이미지 기준
-        trajectory = tracker.get_trajectory()           # [(x, y, t), ...] → 진위 검출 모듈
-        ...
-        tracker.reset()                                 # 새 문제 시작 시
-
-tracker.close()   # 또는 with HandTracker(...) as tracker:
+# 다음 문제
+tracker.set_images(next_problem_img, next_hint_img)   # 상태도 초기화됨
+# 같은 문제를 다시 풀게 할 때는 tracker.reset()
+tracker.close()                                        # 프로그램 끝날 때
 ```
 
-### `HandState`
+카메라 없이 로직만 쓰려면 `tracker.update((x, y), "fist", t)`에 문제 이미지 좌표를 직접 넣거나,
+`tracker.process_landmarks(landmarks, t)`에 랜드마크 21개 `[(x, y), ...]`(정규화 좌표)를 넣으면 된다.
 
-| 필드 | 타입 | 설명 |
+## 설정값 (생성자 키워드 인자)
+
+| 인자 | 기본값 | 설명 |
 |---|---|---|
-| `point` | `(float, float)` 또는 `None` | 스무딩된 손끝 캔버스 좌표 |
-| `progress` | `float` | dwell 진행률 0~1 |
-| `selected` | `bool` | 선택 확정 여부. 확정되면 `reset()` 전까지 상태가 고정됩니다 |
-| `answer` | `(int, int)` 또는 `None` | 확정 시 원본 이미지 기준 좌표 (dwell 동안 머문 점들의 평균) |
-| `side` | `"left"` / `"right"` / `None` | 확정 시 짚은 쪽 |
-| `hand_visible` | `bool` | 손 검출 여부 |
-| `status` | `str` | 위 4가지 상태 상수 (`hand_tracker.STATUS_*`) |
+| `stop_seconds` | 1.0 | 멈춤 판정 시간(초) |
+| `stop_pixels` | 15 | 이 시간 동안 이동 범위가 이 값 **미만**이면 완료 |
+| `lost_seconds` | 0.5 | 기록 중 손이 이 시간 이상 안 보이면 취소 |
+| `alpha` | 0.5 | 좌표 떨림 보정(EMA) 계수. 1.0이면 보정 없음 |
+| `min_folded` | 3 | 주먹 판정: 엄지 제외 접힌 손가락 수 |
+| `mirror` | True | 좌우 반전 (셀카처럼) |
+| `panel_width` | 320 | 힌트 패널 폭 |
+| `model_path` | `models/hand_landmarker.task` | MediaPipe 모델 경로 |
 
-### 궤적 `get_trajectory()`
+판정 기준
+- 위치: 손바닥 중심 = 랜드마크 0, 5, 9, 13, 17의 평균
+- 주먹: 엄지를 뺀 네 손가락 중 `min_folded`개 이상이 접힘 (손가락 끝이 PIP 관절보다 손목에 가까우면 접힘)
 
-- `[(x, y, t), ...]`. x, y는 **스무딩된** 캔버스 좌표이고, t는 `reset()` 뒤 첫 프레임부터 센 초입니다(`time.monotonic` 기준).
-- 손이 보이는 프레임만 기록합니다. 손이 사라진 구간은 t 간격이 벌어지는 것으로 드러납니다.
-- 선택이 확정된 뒤에는 더 쌓지 않습니다. 확정 시점의 리스트가 그 문제의 궤적 전체입니다.
-- 원본 좌표가 필요하면(떨림 분석 등) 진위 검출 담당과 상의해서 `smoothing=1.0`으로 따로 기록하는 옵션을 추가할 수 있습니다.
-
-### 웹캠 없이 쓰기
-
-`update_point(norm_xy, t)`에 정규화 좌표(0~1, 반전이 이미 반영된 값)와 시각을 직접 넣으면
-MediaPipe 없이 같은 로직을 돌릴 수 있습니다. 테스트와 데모의 `--mouse` 모드가 이 방식입니다.
-`detector=`로 직접 만든 검출기(`detect(frame, timestamp_ms) -> (x, y) | None`)를 넣을 수도 있습니다.
-
-## 설정값 (`HandConfig`)
-
-`HandTracker(..., config=HandConfig(...))`로 넘기거나 키워드 인자로 일부만 바꿉니다.
-
-| 이름 | 기본값 | 설명 |
-|---|---|---|
-| `smoothing` | 0.4 | EMA 계수 α. `s = α·p + (1-α)·s`. 작을수록 부드럽지만 반응이 느려짐. 1.0이면 스무딩 없음 |
-| `dwell_radius` | 30 | 이 반경(캔버스 px) 안에 머물러야 함. 처음 들어온 점이 기준점이고, 반경을 벗어나면 그 점에서 다시 시작 |
-| `dwell_time` | 1.0 | 선택 확정까지 머무는 시간(초) |
-| `active_margin` | 0.075 | 카메라 각 변에서 버리는 비율. 0.075면 중앙 85% 영역 사용 |
-| `lost_grace` | 0.15 | 손을 이 시간(초)보다 오래 놓쳐야 dwell을 초기화. 검출이 잠깐 끊기는 것 대비 |
-| `mirror` | True | 좌우 반전 (사용자가 거울처럼 느끼게) |
-| `model_path` | `models/hand_landmarker.task` | 상대 경로면 `hand_tracker.py` 위치 기준 |
-| `min_detection_confidence` | 0.5 | MediaPipe 손 검출 신뢰도 |
-| `min_presence_confidence` | 0.5 | MediaPipe 손 존재 신뢰도 |
-| `min_tracking_confidence` | 0.5 | MediaPipe 추적 신뢰도 |
-
-## 손이 사라졌을 때
-
-`lost_grace`보다 오래 손이 안 보이면 스무딩과 dwell을 초기화하고
-`point=None`, `progress=0`, `status="NO_HAND"`를 돌려줍니다. 궤적은 지우지 않습니다.
+자세한 기준과 이유는 [docs/decisions.md](docs/decisions.md)에 있다.

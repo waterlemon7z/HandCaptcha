@@ -1,4 +1,4 @@
-# 프로젝트 루트의 모듈(hand_tracker 등)을 테스트에서 import할 수 있게 경로 추가
+# 프로젝트 루트의 hand_tracker를 테스트에서 import할 수 있게 경로 추가
 import sys
 from pathlib import Path
 

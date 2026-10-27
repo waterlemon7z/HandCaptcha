@@ -20,13 +20,13 @@ def _shift(box, dx):
     return x1 + dx, y1, x2 + dx, y2
 
 
-def test_create_returns_id_image_and_hint(asset_dir):
+def test_create_returns_id_image_and_target(asset_dir):
     out = ProblemGenerator(asset_dir).create(seed=1)
     assert len(out) == 3
-    problem_id, image, hint = out
+    problem_id, image, target = out
     assert isinstance(problem_id, str)
     assert image.shape == (H, W, 3) and image.dtype == np.uint8
-    assert hint.shape == (200, 200, 4)  # 변형 전 원본
+    assert target.shape == (200, 200, 4)  # 변형 전 원본
 
 
 def test_image_has_answer_and_distractors(asset_dir):
@@ -124,16 +124,16 @@ def test_without_validator_no_history(asset_dir):
     assert gen.auto_solve_rate() is None
 
 
-def test_validator_receives_image_and_hint(asset_dir):
+def test_validator_receives_image_and_target(asset_dir):
     seen = []
 
-    def spy(image, hint):
-        seen.append((image, hint))
+    def spy(image, target):
+        seen.append((image, target))
         return []
 
-    _, image, hint = ProblemGenerator(asset_dir, validator=spy).create(seed=1)
-    [(v_image, v_hint)] = seen
-    assert np.array_equal(v_image, image) and np.array_equal(v_hint, hint)
+    _, image, target = ProblemGenerator(asset_dir, validator=spy).create(seed=1)
+    [(v_image, v_target)] = seen
+    assert np.array_equal(v_image, image) and np.array_equal(v_target, target)
 
 
 def test_always_fail_validator(asset_dir):
@@ -160,8 +160,8 @@ def test_always_solve_hits_retry_cap(asset_dir):
 
 def test_distractors_only_is_not_solved(asset_dir):
     # 방해용 물체만 찾은 validator는 못 푼 것으로 본다
-    def distractors_only(image, hint):
-        boxes = always_solve(image, hint)
+    def distractors_only(image, target):
+        boxes = always_solve(image, target)
         return sorted(boxes, key=lambda b: max(_iou(b, a) for a in answers))[:-1]
 
     gen = ProblemGenerator(asset_dir)
@@ -176,9 +176,9 @@ def test_distractors_only_is_not_solved(asset_dir):
 def test_regenerates_until_validator_fails(asset_dir):
     calls = []
 
-    def solves_twice(image, hint):
+    def solves_twice(image, target):
         calls.append(image)
-        return always_solve(image, hint) if len(calls) <= 2 else []
+        return always_solve(image, target) if len(calls) <= 2 else []
 
     gen = ProblemGenerator(asset_dir, validator=solves_twice)
     _, image, _ = gen.create(seed=1)

@@ -2,7 +2,7 @@
 
     python -m cv.test.problem_gen.preview --out <폴더> --seeds 0 1 2
 
-seed마다 [합성 이미지 | 합성 이미지 + 정답 영역]과 아래에 힌트(정답 물체 원본)를 붙인 이미지와,
+seed마다 [합성 이미지 | 합성 이미지 + 정답 영역]과 아래에 찾을 물체(정답 물체 원본)를 붙인 이미지와,
 블렌딩 방식별 비교(물체 주변 확대) 이미지를 저장한다.
 """
 import argparse
@@ -16,26 +16,26 @@ from cv.problem_gen import generator as G
 from cv.problem_gen.assets import list_assets, read_image, read_object
 from cv.problem_gen.compose import fit_background, place_object, transform_object
 
-HINT_HEIGHT = 160
+TARGET_HEIGHT = 160
 
 
-def _hint_row(hints, width):
+def _target_row(targets, width):
     """물체 원본을 체크무늬(투명 표시) 위에 같은 높이로 늘어놓는다."""
     tiles = []
-    for hint in hints:
-        h, w = hint.shape[:2]
-        hint = cv2.resize(hint, (max(1, round(w * HINT_HEIGHT / h)), HINT_HEIGHT), interpolation=cv2.INTER_AREA)
-        yy, xx = np.indices(hint.shape[:2])
+    for target in targets:
+        h, w = target.shape[:2]
+        target = cv2.resize(target, (max(1, round(w * TARGET_HEIGHT / h)), TARGET_HEIGHT), interpolation=cv2.INTER_AREA)
+        yy, xx = np.indices(target.shape[:2])
         board = np.where(((yy // 16 + xx // 16) % 2)[..., None] == 0, 230, 190).astype(np.float32)
-        a = hint[..., 3:] / 255.0
-        tiles.append(np.rint(hint[..., :3] * a + board * (1 - a)).astype(np.uint8))
-        tiles.append(np.full((HINT_HEIGHT, 20, 3), 255, np.uint8))
+        a = target[..., 3:] / 255.0
+        tiles.append(np.rint(target[..., :3] * a + board * (1 - a)).astype(np.uint8))
+        tiles.append(np.full((TARGET_HEIGHT, 20, 3), 255, np.uint8))
     row = np.hstack(tiles)[:, :width]
-    return np.hstack([row, np.full((HINT_HEIGHT, width - row.shape[1], 3), 255, np.uint8)])
+    return np.hstack([row, np.full((TARGET_HEIGHT, width - row.shape[1], 3), 255, np.uint8)])
 
 
 def save_problem(gen, seed, out):
-    problem_id, image, hint = gen.create(seed=seed)
+    problem_id, image, target = gen.create(seed=seed)
     # 정답은 판정 후에만 공개되므로 아무 박스로 판정해서 받는다
     result = gen.solve(problem_id, (0, 0, 1, 1))
     overlay = image.copy()
@@ -44,7 +44,7 @@ def save_problem(gen, seed, out):
     x1, y1, x2, y2 = result["answer_box"]
     cv2.rectangle(overlay, (x1, y1), (x2 - 1, y2 - 1), (0, 0, 255), 2)
     top = np.hstack([image, overlay])
-    cv2.imwrite(str(out / f"problem_{seed:03d}.png"), np.vstack([top, _hint_row([hint], top.shape[1])]))
+    cv2.imwrite(str(out / f"problem_{seed:03d}.png"), np.vstack([top, _target_row([target], top.shape[1])]))
 
 
 def save_blend_comparison(asset_dir, seed, out):

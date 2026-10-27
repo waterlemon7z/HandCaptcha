@@ -35,12 +35,12 @@ def asset_dir(tmp_path):
     return tmp_path
 
 
-def always_fail(image, hint):
+def always_fail(image, target):
     """항상 못 찾는 가짜 validator."""
     return []
 
 
-def always_solve(image, hint):
+def always_solve(image, target):
     """항상 맞히는 가짜 validator (테스트 전용). 빨간 덩어리(정답과 방해용 물체)마다 박스 (x1, y1, x2, y2)를 반환한다."""
     b, g, r = (image[..., i].astype(int) for i in range(3))
     red = (r - np.maximum(g, b) > 100).astype(np.uint8)

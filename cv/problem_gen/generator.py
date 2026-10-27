@@ -68,9 +68,11 @@ def blend_object(composite, bg, alpha, feather_sigma=BLEND_FEATHER_SIGMA):
 class ProblemGenerator:
     def __init__(self, asset_dir="assets", validator=None, max_attempts=5):
         """
-        validator(image, hint) -> [(x1, y1, x2, y2), ...] | None
-            정답을 모르는 자동 풀이 함수(ORB/SIFT 검수). 합성 이미지와 정답 물체의 원본 이미지를 받아
-            찾은 영역들을 반환한다. 그중 하나라도 정답이면 문제를 다시 만들고,
+        validator(image, target) -> [(x1, y1, x2, y2), ...] | None
+            정답을 모르는 자동 풀이 함수(ORB/SIFT 검수). 합성 이미지(H×W×3 BGR)와
+            정답 물체 1개의 원본 이미지(BGRA, 방해용 물체는 넘기지 않음)를 받아
+            찾은 영역들을 반환한다. alpha는 특징점 검출 마스크로 쓸 수 있다.
+            그중 하나라도 정답이면 문제를 다시 만들고,
             max_attempts번 모두 풀리면 마지막 문제를 그대로 발급한다.
         """
         self._backgrounds, self._objects = list_assets(asset_dir)
@@ -82,10 +84,10 @@ class ProblemGenerator:
         self._history = []
 
     def create(self, seed=None):
-        """새 문제를 만든다. 반환: (problem_id, image, hint).
+        """새 문제를 만든다. 반환: (problem_id, image, target).
 
         image: 물체 NUM_OBJECTS개를 숨긴 합성 이미지 (H×W×3 BGR)
-        hint: 정답 물체의 원본 이미지 (BGRA). 사용자에게 "이것을 찾으세요"로 보여 준다
+        target: 찾아야 할 정답 물체의 원본 이미지 (BGRA). 사용자 화면에 "이것을 찾으세요"로 보여 주고, 검수 입력으로도 쓴다
         정답은 반환하지 않는다.
         """
         if seed is None:
@@ -94,10 +96,10 @@ class ProblemGenerator:
         rng = np.random.default_rng(seed)
         attempts = []
         for _ in range(self._max_attempts):
-            image, hint, answer = self._build(rng)
+            image, target, answer = self._build(rng)
             if self._validator is None:
                 break
-            boxes = [tuple(int(round(float(v))) for v in b) for b in self._validator(image, hint) or []]
+            boxes = [tuple(int(round(float(v))) for v in b) for b in self._validator(image, target) or []]
             solved = any(_hit(answer.box, b) for b in boxes)
             attempts.append({"boxes": boxes, "solved": solved})
             if not solved:
@@ -112,7 +114,7 @@ class ProblemGenerator:
                 "attempts": attempts,
                 "cap_reached": attempts[-1]["solved"],
             })
-        return problem_id, image, hint
+        return problem_id, image, target
 
     def solve(self, problem_id, box):
         """box(합성 이미지 기준 (x1, y1, x2, y2))가 정답 물체의 박스와 HIT_IOU 이상 겹치면 정답.

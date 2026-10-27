@@ -2,7 +2,7 @@
 
     python -m cv.test.problem_gen.preview --out <폴더> --seeds 0 1 2
 
-seed마다 [합성 이미지 | 합성 이미지 + 정답 영역]과 아래에 힌트(물체 원본) 줄을 붙인 이미지와,
+seed마다 [합성 이미지 | 합성 이미지 + 정답 영역]과 아래에 힌트(정답 물체 원본)를 붙인 이미지와,
 블렌딩 방식별 비교(물체 주변 확대) 이미지를 저장한다.
 """
 import argparse
@@ -35,16 +35,16 @@ def _hint_row(hints, width):
 
 
 def save_problem(gen, seed, out):
-    problem_id, image, hints = gen.create(seed=seed)
-    # 정답은 문제가 끝나야 공개되므로 화면 밖을 짚어 오답으로 끝낸다
-    result = gen.solve(problem_id, (-100, -100))
+    problem_id, image, hint = gen.create(seed=seed)
+    # 정답은 판정 후에만 공개되므로 아무 박스로 판정해서 받는다
+    result = gen.solve(problem_id, (0, 0, 1, 1))
     overlay = image.copy()
-    for mask, (x1, y1, x2, y2) in zip(result["answer_masks"], result["answer_boxes"]):
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.drawContours(overlay, contours, -1, (0, 255, 0), 2)
-        cv2.rectangle(overlay, (x1, y1), (x2 - 1, y2 - 1), (0, 0, 255), 2)
+    contours, _ = cv2.findContours(result["answer_mask"], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(overlay, contours, -1, (0, 255, 0), 2)
+    x1, y1, x2, y2 = result["answer_box"]
+    cv2.rectangle(overlay, (x1, y1), (x2 - 1, y2 - 1), (0, 0, 255), 2)
     top = np.hstack([image, overlay])
-    cv2.imwrite(str(out / f"problem_{seed:03d}.png"), np.vstack([top, _hint_row(hints, top.shape[1])]))
+    cv2.imwrite(str(out / f"problem_{seed:03d}.png"), np.vstack([top, _hint_row([hint], top.shape[1])]))
 
 
 def save_blend_comparison(asset_dir, seed, out):

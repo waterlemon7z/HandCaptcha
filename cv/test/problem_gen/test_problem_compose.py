@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-from cv.problem_gen.compose import SURROUND_PX, fit_background, place_object, transform_object
+from cv.problem_gen.compose import SURROUND_PX, fit_background, floor_map, place_object, transform_object
 
 
 def _circle(size=100):
@@ -65,3 +65,31 @@ def test_place_object_same_seed_same_position():
     a1 = place_object(bg, _circle(), np.random.default_rng(4), 0.05, 30, 5)[1]
     a2 = place_object(bg, _circle(), np.random.default_rng(4), 0.05, 30, 5)[1]
     assert np.array_equal(a1, a2)
+
+
+def test_floor_map_marks_items():
+    bg = np.full((480, 640, 3), 200, np.uint8)
+    bg[100:300, 400:600] = (40, 90, 160)
+    floor = floor_map(bg)
+    assert floor[50, 50] > 0.99 and floor[200, 500] < 0.01
+
+
+def test_place_object_tucks_under_items():
+    # 왼쪽 60%는 바닥, 오른쪽 40%는 사진 속 물건: 물체가 경계에 걸쳐 물건 쪽 부분이 가려진다
+    # 경계가 한 줄뿐이라 조건에 맞는 후보가 드물어 후보를 300개 뽑는다 (실제 사진은 100개로 충분)
+    bg = np.full((480, 640, 3), 200, np.uint8)
+    bg[:, 384:] = (40, 90, 160)
+    floor = floor_map(bg)
+    full = np.count_nonzero(_circle()[..., 3] > 127)
+    for seed in range(10):
+        _, alpha = place_object(bg, _circle(), np.random.default_rng(seed), 0.05, 300, 3, None, floor, (0.2, 0.45))
+        visible = alpha > 0.5
+        assert not visible[:, 386:].any(), seed
+        assert 0.15 <= 1 - np.count_nonzero(visible) / full <= 0.5, seed
+
+
+def test_place_object_without_tuck_spot_keeps_whole_object():
+    # 물건이 없는 배경이면 가릴 곳이 없으므로 물체를 그대로 놓는다
+    bg = np.full((480, 640, 3), 200, np.uint8)
+    _, alpha = place_object(bg, _circle(), np.random.default_rng(0), 0.05, 100, 3, None, floor_map(bg), (0.2, 0.45))
+    assert np.count_nonzero(alpha > 0.5) == np.count_nonzero(_circle()[..., 3] > 127)

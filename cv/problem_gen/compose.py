@@ -5,6 +5,8 @@ import numpy as np
 CLEARANCE_PX = 15        # 물체 자리로 보는 범위를 물체 둘레로 넓히는 픽셀 수. 물체끼리도 이만큼 띄운다
 SURROUND_PX = 60         # 물체 주변으로 보는 고리의 바깥 반경(px)
 FLOOR_COLOR_DIST = 20.0  # 바닥 색(Lab)과 이 거리 안이면 바닥으로 본다
+FLOOR_SHADOW = 0.35      # 색은 바닥과 같고 바닥 밝기의 이 비율까지 어두운 곳은 그림자로 보고 바닥에 넣는다
+CUT_EDGE_RATIO = 0.7     # 물체가 잘리는 선 중 이 비율 이상이 실제 윤곽선 위에 있어야 가려진 것으로 인정한다
 
 
 def fit_background(img, size):
@@ -32,15 +34,19 @@ def floor_map(bg):
     """배경에서 가장 흔한 색(책상·바닥)과 비슷한 곳은 1, 사진 속 물건은 0인 지도(float 0~1).
 
     밝기는 그림자·나뭇결로 크게 흔들리므로 색 차이의 절반만 반영한다.
-    흰 책상 위 흰 키보드처럼 바닥과 색이 같은 물건은 바닥으로 잡힌다.
+    색은 바닥과 같고 조금 어둡기만 한 곳은 그림자로 보고 바닥에 넣는다. 그래야 물체가 그림자 경계에서 잘리지 않는다.
+    흰 책상 위 흰 키보드나 회색 클립처럼 바닥과 색이 같거나 비슷한 물건은 바닥으로 잡힌다.
     """
     lab = cv2.cvtColor(cv2.GaussianBlur(bg, (0, 0), 3), cv2.COLOR_BGR2LAB).astype(np.float32)
     q = (lab // np.array([16, 8, 8], np.float32)).astype(np.int32)
     key = (q[..., 0] * 32 + q[..., 1]) * 32 + q[..., 2]
     values, counts = np.unique(key, return_counts=True)
     ref = lab[key == values[np.argmax(counts)]].mean(axis=0)
-    dist = np.sqrt((((lab - ref) * np.array([0.5, 1, 1], np.float32)) ** 2).sum(-1))
-    mask = (dist < FLOOR_COLOR_DIST).astype(np.uint8) * 255
+    d_color = np.sqrt(((lab[..., 1:] - ref[1:]) ** 2).sum(-1))
+    d_light = lab[..., 0] - ref[0]
+    same = np.sqrt(d_color ** 2 + (0.5 * d_light) ** 2) < FLOOR_COLOR_DIST
+    shadow = (d_color < 0.6 * FLOOR_COLOR_DIST) & (d_light < 0) & (lab[..., 0] > ref[0] * (1 - FLOOR_SHADOW))
+    mask = (same | shadow).astype(np.uint8) * 255
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
     mask = cv2.morphologyEx(cv2.morphologyEx(mask, cv2.MORPH_OPEN, k), cv2.MORPH_CLOSE, k)
     # 가려지는 경계가 계단처럼 보이지 않게 살짝 흐린다
@@ -92,7 +98,9 @@ def place_object(bg, obj_bgra, rng, margin, n_candidates=1, top_k=1, occupied=No
     occupied(H×W bool)는 이미 놓은 물체 자리로, CLEARANCE_PX 안으로 겹치는 후보는 고르지 않고
     주변의 복잡도로도 세지 않는다 (숨긴 물체끼리 모이지 않게).
     floor(floor_map 결과)와 hidden_range((최소, 최대) 비율)를 주면, 물체가 사진 속 물건 밑에
-    그 비율만큼 깔리는 후보만 고르고 바닥 위 부분만 그린다. 그런 후보가 없으면 가리지 않고 놓는다.
+    그 비율만큼 깔리는 후보만 고르고 바닥 위 부분만 그린다. 잘리는 선이 실제 물건의 윤곽선 위에 있지 않으면
+    (바닥 얼룩·그림자 경계에서 잘리면) 가려진 게 아니라 잘린 것처럼 보이므로 고르지 않는다.
+    그런 후보가 없으면 가리지 않고 놓는다.
     반환: (alpha로 합성한 이미지 uint8, 배경 크기의 alpha float32 0~1). alpha는 보이는 부분만이다.
     """
     h, w = bg.shape[:2]
@@ -106,6 +114,7 @@ def place_object(bg, obj_bgra, rng, margin, n_candidates=1, top_k=1, occupied=No
     inner = _dilated(obj_bgra[..., 3], r, CLEARANCE_PX)
     ring = _dilated(obj_bgra[..., 3], r, r) - inner
     edges = clutter_map(bg)
+    outline = edges > 0
     if occupied is not None:
         edges[occupied] = 0
     edges = cv2.copyMakeBorder(edges, r, r, r, r, cv2.BORDER_CONSTANT, value=0)
@@ -121,6 +130,15 @@ def place_object(bg, obj_bgra, rng, margin, n_candidates=1, top_k=1, occupied=No
         solid = obj_bgra[..., 3] > 127
         hidden = np.array([1 - (floor[y:y + oh, x:x + ow][solid] > 0.5).mean() for x, y in zip(xs, ys)])
         tucked = (hidden >= hidden_range[0]) & (hidden <= hidden_range[1])
+        # 잘리는 선 = 보이는 부분 중 가려진 부분과 맞닿은 픽셀. 윤곽선에서 2px 안이면 윤곽선 위로 본다
+        near = cv2.dilate(outline.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))) > 0
+        touch = np.ones((3, 3), np.uint8)
+        for i in np.flatnonzero(tucked):
+            x, y = xs[i], ys[i]
+            on_floor = floor[y:y + oh, x:x + ow] > 0.5
+            hid = (solid & ~on_floor).astype(np.uint8)
+            cut = solid & on_floor & (cv2.dilate(hid, touch) > 0)
+            tucked[i] = np.count_nonzero(cut & near[y:y + oh, x:x + ow]) >= CUT_EDGE_RATIO * np.count_nonzero(cut)
         occlude = bool((tucked & np.isfinite(scores)).any())
         if occlude:
             scores[~tucked] = np.inf

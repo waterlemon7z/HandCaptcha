@@ -93,3 +93,23 @@ def test_place_object_without_tuck_spot_keeps_whole_object():
     bg = np.full((480, 640, 3), 200, np.uint8)
     _, alpha = place_object(bg, _circle(), np.random.default_rng(0), 0.05, 100, 3, None, floor_map(bg), (0.2, 0.45))
     assert np.count_nonzero(alpha > 0.5) == np.count_nonzero(_circle()[..., 3] > 127)
+
+
+def test_floor_map_counts_shadow_as_floor():
+    # 바닥과 같은 색으로 20% 어두운 곳은 그림자: 바닥으로 본다
+    bg = np.full((480, 640, 3), (180, 200, 220), np.uint8)
+    bg[100:300, 400:600] = (144, 160, 176)
+    assert floor_map(bg)[200, 500] > 0.99
+
+
+def test_place_object_does_not_cut_on_soft_boundary():
+    # 색이 다른 영역이지만 경계가 흐릿해 윤곽선이 없다: 물건이 아니라 얼룩이므로 그 경계에서 자르지 않는다
+    bg = np.full((480, 640, 3), 200, np.uint8)
+    bg[:, 384:] = (40, 90, 160)
+    bg = cv2.GaussianBlur(bg, (0, 0), 60)
+    floor = floor_map(bg)
+    assert floor[:, 50].min() > 0.99 and floor[:, 620].max() < 0.01
+    full = np.count_nonzero(_circle()[..., 3] > 127)
+    for seed in range(5):
+        _, alpha = place_object(bg, _circle(), np.random.default_rng(seed), 0.05, 300, 3, None, floor, (0.2, 0.45))
+        assert np.count_nonzero(alpha > 0.5) == full, seed

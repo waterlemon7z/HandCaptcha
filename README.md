@@ -61,18 +61,25 @@ py -3.12 -m venv .venv
 | 필드 | 형식 | 설명 |
 |---|---|---|
 | `position` | `(x, y)` 또는 `None` | **검지 끝**(랜드마크 8) 좌표, EMA 보정본. 손이 없거나 문제 이미지 밖이면 `None` |
-| `raw_position` | `(x, y)` 또는 `None` | 같은 프레임의 **EMA 적용 전 원본** 좌표. `position`이 `None`이면 `None` |
+| `raw_position` | `(x, y)` float 또는 `None` | 같은 프레임의 **EMA 적용 전 원본** 좌표. **반올림하지 않은 float**. `position`이 `None`이면 `None` |
 | `hand_status` | `"none"` / `"open"` / `"fist"` | 손 모양 |
 | `state` | `"idle"` / `"recording"` / `"done"` | 기록 상태 |
 | `trajectory` | `np.ndarray (N, 2)` int32 | 기록 시작(주먹)부터 지금(또는 완료)까지의 궤적 전체(EMA 보정본), 각 행이 `(x, y)`. 길이 제한 없음 |
-| `raw_trajectory` | `np.ndarray (N, 2)` int32 | `trajectory`와 같은 프레임들의 **원본** 좌표. `trajectory[i]`와 `raw_trajectory[i]`가 짝 |
+| `raw_trajectory` | `np.ndarray (N, 2)` **float64** | `trajectory`와 같은 프레임들의 **원본** 좌표. **반올림하지 않은 float**. `trajectory[i]`와 `raw_trajectory[i]`가 짝 |
 | `timestamps` | `np.ndarray (N,)` | 각 점의 시각(초), 기록 시작 = 0. 진위검출용 |
 | `stop_position` | `(x, y)` 또는 `None` | `state == "done"`일 때만. **마지막에 멈춘 위치** = 멈춤 판정에 쓴 최근 1초 동안 점들의 평균 |
 | `box` | `(x1, y1, x2, y2)` 또는 `None` | `state == "done"`일 때만. **경로 전체**를 감싸는 사각형. 항상 `x1 < x2`, `y1 < y2`, 이미지 안. 화면에는 그리지 않음 |
 | `frames` | `list[np.ndarray]` 또는 `None` | `state == "done"`일 때만. 기록 중 모은 **검지 끝 주변 crop**(기본 128×128) 또는 1/4 축소본. `process(frame)`으로 돌리면 `trajectory`와 같은 개수 |
 | `frame_timestamps` | `np.ndarray` 또는 `None` | `state == "done"`일 때만. `frames` 각각의 시각(초), `timestamps`와 같은 기준 |
+| `frame_size` | `(w, h)` 또는 `None` | **카메라 프레임 크기** (가로, 세로 순서). 마지막으로 받은 프레임 기준이고 `reset()`해도 유지. 프레임을 받은 적이 없으면 `None` (`update()`만 쓰는 경우 등) |
 
 **좌표는 모두 문제 이미지 기준**(x 0~1279, y 0~719)이다. 원본 좌표도 이미지 범위 안으로 자른다.
+`frame_size`만 예외로 카메라 프레임 기준이다. crop 위치를 카메라 좌표로 되돌리거나 해상도를 확인할 때 쓴다.
+
+**정수와 float**
+- `position`, `trajectory`, `stop_position`, `box`: 정수 (팀 약속)
+- `raw_position`, `raw_trajectory`: **float 그대로**. 미세 떨림 분석에서 반올림 오차가 생기지 않게
+- 화면(`render`)에 그릴 때만 정수로 바꾼다. 다른 곳에서 OpenCV로 직접 그릴 때도 `int(round(x))`로 바꿔서 넘긴다.
 `frames`는 카메라 프레임에서 잘라 낸 이미지이고, 화면과 같은 방향이 되도록 좌우 반전돼 있다.
 
 ### 상태 전환
@@ -106,7 +113,8 @@ while True:
         stop = result.stop_position               # (x, y) 마지막에 멈춘 위치 → 정답 판정
         path_box = result.box                     # (x1, y1, x2, y2) 경로 전체 범위 (필요하면)
         trajectory = result.trajectory            # (N, 2) 움직인 경로 (보정본) → 진위검출
-        raw = result.raw_trajectory               # (N, 2) 같은 경로의 원본 (미세 떨림 분석용)
+        raw = result.raw_trajectory               # (N, 2) float, 같은 경로의 원본 (미세 떨림 분석용)
+        cam_w, cam_h = result.frame_size          # 카메라 프레임 크기
         times = result.timestamps                 # (N,)  → 진위검출
         frames = result.frames                    # 손끝 crop 이미지 목록 → 진위검출 (필요하면)
         frame_times = result.frame_timestamps     # frames 각각의 시각

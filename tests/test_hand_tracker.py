@@ -12,6 +12,8 @@ from hand_tracker import (
     HandTracker,
     classify_hand,
     count_folded_fingers,
+    crop_around,
+    index_tip,
     palm_center,
 )
 
@@ -73,18 +75,36 @@ def test_min_folded_is_configurable():
     assert classify_hand(make_landmarks(folded=2), min_folded=2) == HAND_FIST
 
 
-def test_landmarks_map_to_problem_image_with_mirror():
+def test_index_tip_is_landmark_8():
+    lm = make_landmarks(0.3, 0.6)
+    assert index_tip(lm) == pytest.approx((0.24, 0.44))   # 펴진 검지 끝 = (cx-0.06, cy-0.16)
+
+
+def test_cursor_follows_index_tip_with_mirror():
     tr = make_tracker()
     r = tr.process_landmarks(make_landmarks(0.25, 0.5), t=0.0)
-    # 좌우 반전: 카메라 x=0.25 → 화면 x=0.75
-    assert r.position == (round(0.75 * (W - 1)), round(0.5 * (H - 1)))
+    # 검지 끝 카메라 x=0.19 → 좌우 반전 → 화면 x=0.81, y=0.34
+    assert r.position == (round(0.81 * (W - 1)), round(0.34 * (H - 1)))
     assert r.hand_status == HAND_OPEN
 
 
 def test_landmarks_without_mirror():
     tr = make_tracker(mirror=False)
     r = tr.process_landmarks(make_landmarks(0.25, 0.5), t=0.0)
-    assert r.position[0] == round(0.25 * (W - 1))
+    assert r.position[0] == round(0.19 * (W - 1))
+
+
+def test_palm_anchor_option():
+    tr = make_tracker(anchor="palm")
+    r = tr.process_landmarks(make_landmarks(0.25, 0.5), t=0.0)
+    assert r.position == (round(0.75 * (W - 1)), round(0.5 * (H - 1)))
+
+
+def test_bad_anchor_and_clip_mode():
+    with pytest.raises(ValueError):
+        make_tracker(anchor="thumb")
+    with pytest.raises(ValueError):
+        make_tracker(clip_mode="full")
 
 
 def test_no_landmarks_means_no_hand():
@@ -334,14 +354,18 @@ def test_save_path_and_stop_separately(tmp_path, monkeypatch):
 
     monkeypatch.setattr(demo, "RECORDINGS", tmp_path)
     tr = make_tracker()
-    r = busy_result(tr)
-    path_file, stop_file = demo.save_result(r)
-    assert path_file != stop_file
+    r, _ = run_with_frames(tr)
+    path_file, stop_file, frames_file = demo.save_result(r)
+    assert len({path_file, stop_file, frames_file}) == 3
     data = np.loadtxt(path_file, delimiter=",", skiprows=1)
-    assert data.shape == (len(r.trajectory), 3)
-    assert np.array_equal(data[:, 1:].astype(int), r.trajectory)
+    assert data.shape == (len(r.trajectory), 5)
+    assert np.array_equal(data[:, 1:3].astype(int), r.trajectory)
+    assert np.array_equal(data[:, 3:5].astype(int), r.raw_trajectory)
     stop = np.loadtxt(stop_file, delimiter=",", skiprows=1)
     assert tuple(stop.astype(int)) == r.stop_position
+    saved = np.load(frames_file)
+    assert saved["frames"].shape == (len(r.frames), 128, 128, 3)
+    assert np.allclose(saved["frame_timestamps"], r.frame_timestamps)
 
 
 def test_stop_position_is_where_hand_stopped_not_whole_path():
@@ -425,3 +449,135 @@ def test_set_images_replaces_and_resets():
     assert np.array_equal(canvas[100:, :W][canvas[100:, :W] != 0], [])   # 새 문제 이미지(검정)
     x0, y0, nw, nh = tr.hint_rect
     assert nh > nw   # 세로로 긴 힌트도 비율 유지
+
+
+# ---------------------------------------------------------------- EMA 전 원본 좌표 (raw)
+
+def test_raw_position_and_trajectory_are_before_ema():
+    tr = make_tracker(alpha=0.5)
+    pts = [(100, 100), (200, 300), (300, 100), (400, 300)]
+    r, _ = feed(tr, pts)
+    assert r.state == STATE_RECORDING
+    assert r.raw_trajectory.tolist() == [list(p) for p in pts]          # 원본 그대로
+    assert r.trajectory.tolist() != r.raw_trajectory.tolist()           # 보정본은 다름
+    assert r.trajectory.shape == r.raw_trajectory.shape                 # 같은 프레임끼리 짝
+    assert r.raw_position == (400, 300)
+    assert r.position != r.raw_position
+
+
+def test_raw_is_none_when_hand_ignored():
+    tr = make_tracker()
+    r = tr.update((W + 50, 300), HAND_OPEN, 0.0)   # 힌트 패널 쪽
+    assert r.position is None and r.raw_position is None
+
+
+def test_raw_cleared_on_cancel_and_reset():
+    tr = make_tracker()
+    r, t = feed(tr, [(100 + i * 10, 300) for i in range(5)])
+    r = tr.update(None, HAND_NONE, t + 1.0)           # 손 놓침 → 취소
+    assert len(r.raw_trajectory) == 0
+    feed(tr, [(100, 300)] * 3, t0=t + 2)
+    tr.reset()
+    assert len(tr.update(None, HAND_NONE, t + 5).raw_trajectory) == 0
+
+
+def test_raw_clipped_into_image():
+    """EMA 보정본은 이미지 안이지만 원본은 살짝 밖인 프레임도 이미지 범위로 잘라 기록한다."""
+    tr = make_tracker(alpha=0.5)
+    tr.update((W - 10, 300), HAND_FIST, 0.0)
+    r = tr.update((W + 4, 300), HAND_FIST, DT)       # 보정본 x = W-3 (안), 원본 x = W+4 (밖)
+    assert r.position[0] == W - 3
+    assert r.raw_position[0] == W - 1
+    assert r.raw_trajectory[-1, 0] == W - 1
+
+
+# ---------------------------------------------------------------- 기록 중 프레임 버퍼
+
+CAM_H, CAM_W = 480, 640
+
+
+def make_frame():
+    """좌표마다 값이 다른 가짜 카메라 프레임 (crop 위치를 확인하려고)."""
+    ys, xs = np.mgrid[0:CAM_H, 0:CAM_W]
+    return np.stack([xs % 256, ys % 256, (xs // 256) * 64 + (ys // 256)], axis=2).astype(np.uint8)
+
+
+def run_with_frames(tr, n_move=20, n_still=31):
+    """검지 끝을 움직였다가 멈추는 손을 frame과 함께 넣는다."""
+    frame, t, r = make_frame(), 0.0, None
+    for i in range(n_move + n_still):
+        cx = 0.3 + 0.01 * min(i, n_move)
+        r = tr.process_landmarks(make_landmarks(cx, 0.5, folded=0 if i else 4), t, frame)
+        t += DT
+    return r, frame
+
+
+def test_frames_returned_only_when_done():
+    tr = make_tracker()
+    frame = make_frame()
+    r = tr.process_landmarks(make_landmarks(0.4, 0.5, folded=4), 0.0, frame)
+    assert r.state == STATE_RECORDING
+    assert r.frames is None and r.frame_timestamps is None
+    r, _ = run_with_frames(make_tracker())
+    assert r.state == STATE_DONE
+    assert r.frames is not None
+
+
+def test_frames_align_with_trajectory():
+    r, _ = run_with_frames(make_tracker())
+    assert len(r.frames) == len(r.trajectory) == len(r.frame_timestamps)
+    assert np.allclose(r.frame_timestamps, r.timestamps)
+    assert all(f.shape == (128, 128, 3) for f in r.frames)
+
+
+def test_crop_is_centered_on_index_tip_and_mirrored():
+    tr = make_tracker(crop_size=64)
+    frame = make_frame()
+    lm = make_landmarks(0.5, 0.5, folded=4)       # 접힌 검지 끝 = (0.44, 0.52)
+    r = tr.process_landmarks(lm, 0.0, frame)
+    for _ in range(31):
+        r = tr.process_landmarks(lm, r.timestamps[-1] + DT, frame)
+    assert r.state == STATE_DONE
+    tx, ty = round(0.44 * (CAM_W - 1)), round(0.52 * (CAM_H - 1))
+    expected = frame[ty - 32:ty + 32, tx - 32:tx + 32][:, ::-1]   # 화면과 같은 방향(좌우 반전)
+    assert np.array_equal(r.frames[0], expected)
+
+
+def test_crop_keeps_size_at_frame_edge():
+    frame = make_frame()
+    crop = crop_around(frame, (2, CAM_H - 3), 128)
+    assert crop.shape == (128, 128, 3)
+    assert crop[0, 0].tolist() == [0, 0, 0]                  # 프레임 밖은 검정
+    assert crop[64, 64].tolist() == frame[CAM_H - 3, 2].tolist()   # 가운데 = 지정한 점
+
+
+def test_quarter_mode():
+    r, frame = run_with_frames(make_tracker(clip_mode="quarter"))
+    assert r.frames[0].shape == (CAM_H // 4, CAM_W // 4, 3)
+
+
+def test_clip_mode_none_collects_nothing():
+    r, _ = run_with_frames(make_tracker(clip_mode=None))
+    assert r.state == STATE_DONE
+    assert r.frames == [] and len(r.frame_timestamps) == 0
+
+
+def test_frames_cleared_on_cancel():
+    tr = make_tracker()
+    frame = make_frame()
+    tr.process_landmarks(make_landmarks(0.4, 0.5, folded=4), 0.0, frame)
+    tr.process_landmarks(make_landmarks(0.41, 0.5), DT, frame)
+    tr.process_landmarks(None, 1.0)                            # 0.5초 넘게 놓침 → 취소
+    assert tr._clips == [] and tr._clip_times == []
+
+
+def test_no_frames_collected_in_idle_or_after_done():
+    tr = make_tracker()
+    frame = make_frame()
+    for i in range(10):                                       # 편 손: idle
+        tr.process_landmarks(make_landmarks(0.4, 0.5), i * DT, frame)
+    assert tr._clips == []
+    r, _ = run_with_frames(tr)
+    n = len(r.frames)
+    r = tr.process_landmarks(make_landmarks(0.6, 0.5), 10.0, frame)   # done 이후
+    assert len(r.frames) == n

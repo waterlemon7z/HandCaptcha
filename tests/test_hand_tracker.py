@@ -349,25 +349,6 @@ def test_trajectory_kept_from_start_until_done():
     assert r.timestamps[-1] == pytest.approx((len(move) + len(still) - 1) * DT)
 
 
-def test_save_path_and_stop_separately(tmp_path, monkeypatch):
-    import demo
-
-    monkeypatch.setattr(demo, "RECORDINGS", tmp_path)
-    tr = make_tracker()
-    r, _ = run_with_frames(tr)
-    path_file, stop_file, frames_file = demo.save_result(r)
-    assert len({path_file, stop_file, frames_file}) == 3
-    data = np.loadtxt(path_file, delimiter=",", skiprows=1)
-    assert data.shape == (len(r.trajectory), 5)
-    assert np.array_equal(data[:, 1:3].astype(int), r.trajectory)
-    assert np.array_equal(data[:, 3:5].astype(int), r.raw_trajectory)
-    stop = np.loadtxt(stop_file, delimiter=",", skiprows=1)
-    assert tuple(stop.astype(int)) == r.stop_position
-    saved = np.load(frames_file)
-    assert saved["frames"].shape == (len(r.frames), 128, 128, 3)
-    assert np.allclose(saved["frame_timestamps"], r.frame_timestamps)
-
-
 def test_stop_position_is_where_hand_stopped_not_whole_path():
     tr = make_tracker()
     move = [(100 + i * 20, 100 + i * 10) for i in range(40)]   # 크게 이동

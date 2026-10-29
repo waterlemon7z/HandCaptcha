@@ -446,6 +446,48 @@ def test_raw_position_and_trajectory_are_before_ema():
     assert r.position != r.raw_position
 
 
+def test_raw_keeps_float_without_rounding():
+    tr = make_tracker(alpha=0.5)
+    pts = [(100.4, 200.6), (150.25, 210.75), (199.5, 220.5)]
+    r, _ = feed(tr, pts)
+    assert r.raw_trajectory.dtype == np.float64
+    assert r.raw_trajectory.tolist() == [list(p) for p in pts]          # 소수점 그대로
+    assert r.raw_position == (199.5, 220.5)
+    assert all(isinstance(v, float) for v in r.raw_position)
+    # 보정본(position, trajectory)은 팀 약속대로 정수
+    assert r.trajectory.dtype == np.int32
+    assert all(isinstance(v, int) for v in r.position)
+
+
+def test_raw_trajectory_float_dtype_even_when_empty():
+    tr = make_tracker()
+    r = tr.update(None, HAND_NONE, 0.0)
+    assert r.raw_trajectory.shape == (0, 2) and r.raw_trajectory.dtype == np.float64
+
+
+def test_raw_from_landmarks_is_not_rounded():
+    """랜드마크 → 문제 이미지 변환 결과가 정수가 아니어도 원본은 그대로 남는다."""
+    tr = make_tracker()
+    lm = make_landmarks(0.3, 0.5, folded=4)
+    r = tr.process_landmarks(lm, 0.0)
+    tx, ty = index_tip(lm)
+    expected = ((1 - tx) * (W - 1), ty * (H - 1))
+    assert r.raw_position == pytest.approx(expected)
+    assert r.raw_trajectory[0] == pytest.approx(expected)
+    assert expected[0] != round(expected[0])                             # 실제로 소수 좌표인 경우
+
+
+def test_render_accepts_float_coordinates():
+    """그릴 때만 int로 바꾸므로 float 좌표가 들어와도 render가 동작한다."""
+    tr = make_tracker()
+    r = busy_result(tr)
+    r.position = (300.6, 200.4)
+    r.stop_position = (500.5, 400.49)
+    as_float = tr.render(r)
+    r.position, r.stop_position = (301, 200), (500, 400)
+    assert np.array_equal(as_float, tr.render(r))
+
+
 def test_raw_is_none_when_hand_ignored():
     tr = make_tracker()
     r = tr.update((W + 50, 300), HAND_OPEN, 0.0)   # 힌트 패널 쪽
@@ -468,8 +510,37 @@ def test_raw_clipped_into_image():
     tr.update((W - 10, 300), HAND_FIST, 0.0)
     r = tr.update((W + 4, 300), HAND_FIST, DT)       # 보정본 x = W-3 (안), 원본 x = W+4 (밖)
     assert r.position[0] == W - 3
-    assert r.raw_position[0] == W - 1
-    assert r.raw_trajectory[-1, 0] == W - 1
+    assert r.raw_position[0] == W - 1.0
+    assert r.raw_trajectory[-1, 0] == W - 1.0
+
+
+# ---------------------------------------------------------------- 카메라 프레임 크기
+
+def test_frame_size_from_process_landmarks():
+    tr = make_tracker()
+    r = tr.process_landmarks(make_landmarks(), 0.0, np.zeros((480, 640, 3), np.uint8))
+    assert r.frame_size == (640, 480)                                   # (w, h) 순서
+
+
+def test_frame_size_none_without_frame():
+    tr = make_tracker()
+    assert tr.process_landmarks(make_landmarks(), 0.0).frame_size is None
+    assert tr.update((100, 100), HAND_OPEN, DT).frame_size is None
+
+
+def test_frame_size_reported_even_without_hand_and_after_reset():
+    tr = make_tracker()
+    r = tr.process_landmarks(None, 0.0, np.zeros((720, 1280, 3), np.uint8))
+    assert r.position is None and r.frame_size == (1280, 720)
+    tr.reset()
+    assert tr.update(None, HAND_NONE, 1.0).frame_size == (1280, 720)   # 카메라 정보라 reset해도 유지
+
+
+def test_frame_size_follows_latest_frame():
+    tr = make_tracker()
+    tr.process_landmarks(None, 0.0, np.zeros((480, 640, 3), np.uint8))
+    r = tr.process_landmarks(None, DT, np.zeros((240, 320, 3), np.uint8))
+    assert r.frame_size == (320, 240)
 
 
 # ---------------------------------------------------------------- 기록 중 프레임 버퍼

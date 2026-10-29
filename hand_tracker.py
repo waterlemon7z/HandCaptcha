@@ -39,6 +39,10 @@ def _empty_points() -> np.ndarray:
     return np.empty((0, 2), np.int32)
 
 
+def _empty_float_points() -> np.ndarray:
+    return np.empty((0, 2), np.float64)
+
+
 @dataclass
 class HandResult:
     """process()가 매 프레임 돌려주는 결과."""
@@ -50,10 +54,11 @@ class HandResult:
     timestamps: np.ndarray = field(default_factory=lambda: np.empty(0))  # (N,) 기록 시작부터의 초
     box: Optional[tuple[int, int, int, int]] = None      # done일 때 경로 전체를 감싸는 (x1, y1, x2, y2)
     stop_position: Optional[tuple[int, int]] = None      # done일 때 마지막에 멈춘 위치 (멈춘 1초 동안의 평균)
-    raw_position: Optional[tuple[int, int]] = None       # position과 같은 프레임의 EMA 적용 전 원본 좌표
-    raw_trajectory: np.ndarray = field(default_factory=_empty_points)   # (N, 2) trajectory와 같은 프레임의 원본 좌표
+    raw_position: Optional[tuple[float, float]] = None   # position과 같은 프레임의 EMA 적용 전 원본 좌표 (float, 반올림 안 함)
+    raw_trajectory: np.ndarray = field(default_factory=_empty_float_points)  # (N, 2) float64, trajectory와 같은 프레임의 원본 좌표
     frames: Optional[list[np.ndarray]] = None            # done일 때 기록 중 모은 손끝 crop(또는 1/4 축소본) 이미지들
     frame_timestamps: Optional[np.ndarray] = None        # done일 때 frames 각각의 시각 (timestamps와 같은 기준)
+    frame_size: Optional[tuple[int, int]] = None         # 카메라 프레임 크기 (w, h). 프레임을 받은 적이 없으면 None
 
 
 # ---------------------------------------------------------------- 랜드마크 → (위치, 상태)
@@ -135,6 +140,7 @@ class HandTracker:
         self.model_path = Path(model_path)
         self._landmarker = None         # 첫 process() 때 만든다 (테스트는 MediaPipe 없이 동작)
         self._last_ts_ms = -1
+        self._frame_size: Optional[tuple[int, int]] = None   # 마지막으로 받은 카메라 프레임 크기 (reset해도 유지)
         self.set_images(problem_img, hint_img)
 
     # ------------------------------------------------------------ 공개 API
@@ -165,8 +171,10 @@ class HandTracker:
                           frame: Optional[np.ndarray] = None) -> HandResult:
         """손 랜드마크 21개(정규화 x, y) 또는 None으로 한 프레임을 처리한다.
 
-        frame을 주면 기록 중인 프레임의 손끝 crop(또는 1/4 축소본)을 버퍼에 모은다.
+        frame을 주면 카메라 프레임 크기를 기억하고, 기록 중인 프레임의 손끝 crop(또는 1/4 축소본)을 버퍼에 모은다.
         """
+        if frame is not None:
+            self._frame_size = (int(frame.shape[1]), int(frame.shape[0]))
         if landmarks is None:
             return self.update(None, HAND_NONE, t)
         nx, ny = index_tip(landmarks) if self.anchor == "index_tip" else palm_center(landmarks)
@@ -215,7 +223,8 @@ class HandTracker:
                 self.state = STATE_IDLE
                 self._clear_recording()
 
-        return self._result(self._to_pixel(point), self._to_pixel(raw), hand_status)
+        raw_position = None if raw is None else self._clip_to_image(raw)   # 원본은 float 그대로
+        return self._result(self._to_pixel(point), raw_position, hand_status)
 
     def render(self, result: HandResult) -> np.ndarray:
         """사용자 화면: 왼쪽 문제 이미지(오버레이 포함) + 오른쪽 힌트 패널(항상 원본 그대로).
@@ -227,14 +236,16 @@ class HandTracker:
         color = {STATE_IDLE: (200, 200, 200), STATE_RECORDING: (0, 140, 255),
                  STATE_DONE: (0, 200, 0)}[result.state]
 
+        # 좌표는 그릴 때만 int로 바꾼다 (OpenCV 그리기 함수는 정수 좌표만 받음)
         if result.stop_position is not None:
-            sx, sy = result.stop_position
-            cv2.circle(left, (sx, sy), 24, (0, 200, 0), 3, cv2.LINE_AA)
-            cv2.drawMarker(left, (sx, sy), (0, 200, 0), cv2.MARKER_CROSS, 20, 2)
+            stop = _int_point(result.stop_position)
+            cv2.circle(left, stop, 24, (0, 200, 0), 3, cv2.LINE_AA)
+            cv2.drawMarker(left, stop, (0, 200, 0), cv2.MARKER_CROSS, 20, 2)
         if result.position is not None:
+            pos = _int_point(result.position)
             radius = 14 if result.hand_status == HAND_FIST else 10
-            cv2.circle(left, result.position, radius, color, -1, cv2.LINE_AA)
-            cv2.circle(left, result.position, radius, (0, 0, 0), 2, cv2.LINE_AA)
+            cv2.circle(left, pos, radius, color, -1, cv2.LINE_AA)
+            cv2.circle(left, pos, radius, (0, 0, 0), 2, cv2.LINE_AA)
 
         text = f"{result.state.upper()}  hand: {result.hand_status}"
         cv2.rectangle(left, (0, 0), (420, 40), (0, 0, 0), -1)
@@ -336,9 +347,10 @@ class HandTracker:
         if done:   # 버퍼는 확정 시에만 넘긴다 (기록 중 매 프레임 복사하지 않으려고)
             frames = list(self._clips)
             frame_times = np.asarray(self._clip_times, dtype=float) - t0
+        raw_traj = np.asarray(self._raw_points, dtype=np.float64).reshape(-1, 2)   # 반올림하지 않음
         return HandResult(position, hand_status, self.state, to_array(self._points), times,
                           self._box if done else None, self._stop if done else None,
-                          raw_position, to_array(self._raw_points), frames, frame_times)
+                          raw_position, raw_traj, frames, frame_times, self._frame_size)
 
     def _build_hint_panel(self) -> np.ndarray:
         """힌트 패널: 어두운 배경 + "찾을 대상" 글자 + 비율 유지해 축소·가운데 배치한 힌트 이미지."""
@@ -390,6 +402,11 @@ class HandTracker:
             num_hands=1,
         )
         return vision.HandLandmarker.create_from_options(options)
+
+
+def _int_point(p) -> tuple[int, int]:
+    """그리기용 정수 좌표."""
+    return int(round(float(p[0]))), int(round(float(p[1])))
 
 
 def _draw_label(img: np.ndarray, text: str, fallback: str, pos: tuple[int, int],

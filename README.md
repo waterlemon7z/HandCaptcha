@@ -34,9 +34,11 @@ py -3.12 -m venv .venv
 - 손을 펴서 보이면 문제 이미지 위에 커서가 나온다 (회색 = idle).
 - **주먹**을 쥐면 기록이 시작된다 (주황색). 기록 중에는 손을 펴도 된다.
 - 찾을 대상으로 손을 옮겨 **1초 멈추면** 완료된다. 멈춘 위치에 초록 원과 십자 표시가 나온다.
-- 이동 경로는 화면에 그리지 않는다. 완료되면 `recordings/`에 두 파일을 따로 저장한다.
-  - `path_날짜_시각.csv` (열 `t,x,y`): 기록 시작부터 완료까지 움직인 경로 전체
+- 이동 경로는 화면에 그리지 않는다. 완료되면 `recordings/`에 세 파일을 따로 저장한다.
+  - `path_날짜_시각.csv` (열 `t,x,y,raw_x,raw_y`): 기록 시작부터 완료까지 움직인 경로 전체 (보정본과 원본)
   - `stop_날짜_시각.csv` (열 `x,y`): 마지막에 멈춘 위치 한 점
+  - `frames_날짜_시각.npz` (`frames`, `frame_timestamps`): 기록 중 모은 손끝 crop 이미지들.
+    `np.load(파일)["frames"]`로 읽는다.
 - 완료되면 그 상태로 멈춰 있다. 화면 아래 **다시하기** 버튼을 클릭하거나 `r`을 누르면 처음부터 다시 한다.
 - `q` 종료
 - `samples/problem.png`, `samples/hint.png`가 있으면 그 이미지를 쓰고, 없으면 임시 이미지를 만든다.
@@ -61,15 +63,20 @@ py -3.12 -m venv .venv
 ### 출력 `HandResult` (dataclass)
 | 필드 | 형식 | 설명 |
 |---|---|---|
-| `position` | `(x, y)` 또는 `None` | 손바닥 중심 좌표. 손이 없거나 문제 이미지 밖이면 `None` |
+| `position` | `(x, y)` 또는 `None` | **검지 끝**(랜드마크 8) 좌표, EMA 보정본. 손이 없거나 문제 이미지 밖이면 `None` |
+| `raw_position` | `(x, y)` 또는 `None` | 같은 프레임의 **EMA 적용 전 원본** 좌표. `position`이 `None`이면 `None` |
 | `hand_status` | `"none"` / `"open"` / `"fist"` | 손 모양 |
 | `state` | `"idle"` / `"recording"` / `"done"` | 기록 상태 |
-| `trajectory` | `np.ndarray (N, 2)` int32 | 기록 시작(주먹)부터 지금(또는 완료)까지의 궤적 전체, 각 행이 `(x, y)`. 길이 제한 없음 |
+| `trajectory` | `np.ndarray (N, 2)` int32 | 기록 시작(주먹)부터 지금(또는 완료)까지의 궤적 전체(EMA 보정본), 각 행이 `(x, y)`. 길이 제한 없음 |
+| `raw_trajectory` | `np.ndarray (N, 2)` int32 | `trajectory`와 같은 프레임들의 **원본** 좌표. `trajectory[i]`와 `raw_trajectory[i]`가 짝 |
 | `timestamps` | `np.ndarray (N,)` | 각 점의 시각(초), 기록 시작 = 0. 진위검출용 |
 | `stop_position` | `(x, y)` 또는 `None` | `state == "done"`일 때만. **마지막에 멈춘 위치** = 멈춤 판정에 쓴 최근 1초 동안 점들의 평균 |
 | `box` | `(x1, y1, x2, y2)` 또는 `None` | `state == "done"`일 때만. **경로 전체**를 감싸는 사각형. 항상 `x1 < x2`, `y1 < y2`, 이미지 안. 화면에는 그리지 않음 |
+| `frames` | `list[np.ndarray]` 또는 `None` | `state == "done"`일 때만. 기록 중 모은 **검지 끝 주변 crop**(기본 128×128) 또는 1/4 축소본. `process(frame)`으로 돌리면 `trajectory`와 같은 개수 |
+| `frame_timestamps` | `np.ndarray` 또는 `None` | `state == "done"`일 때만. `frames` 각각의 시각(초), `timestamps`와 같은 기준 |
 
-**좌표는 모두 문제 이미지 기준**(x 0~1279, y 0~719)이다.
+**좌표는 모두 문제 이미지 기준**(x 0~1279, y 0~719)이다. 원본 좌표도 이미지 범위 안으로 자른다.
+`frames`는 카메라 프레임에서 잘라 낸 이미지이고, 화면과 같은 방향이 되도록 좌우 반전돼 있다.
 
 ### 상태 전환
 ```
@@ -101,8 +108,11 @@ while True:
     if result.state == "done":
         stop = result.stop_position               # (x, y) 마지막에 멈춘 위치 → 정답 판정
         path_box = result.box                     # (x1, y1, x2, y2) 경로 전체 범위 (필요하면)
-        trajectory = result.trajectory            # (N, 2) 움직인 경로 → 진위검출
+        trajectory = result.trajectory            # (N, 2) 움직인 경로 (보정본) → 진위검출
+        raw = result.raw_trajectory               # (N, 2) 같은 경로의 원본 (미세 떨림 분석용)
         times = result.timestamps                 # (N,)  → 진위검출
+        frames = result.frames                    # 손끝 crop 이미지 목록 → 진위검출 (필요하면)
+        frame_times = result.frame_timestamps     # frames 각각의 시각
         break
 
 # 다음 문제
@@ -112,7 +122,8 @@ tracker.close()                                        # 프로그램 끝날 때
 ```
 
 카메라 없이 로직만 쓰려면 `tracker.update((x, y), "fist", t)`에 문제 이미지 좌표를 직접 넣거나,
-`tracker.process_landmarks(landmarks, t)`에 랜드마크 21개 `[(x, y), ...]`(정규화 좌표)를 넣으면 된다.
+`tracker.process_landmarks(landmarks, t, frame)`에 랜드마크 21개 `[(x, y), ...]`(정규화 좌표)를 넣으면 된다.
+`frame`을 빼면 프레임 버퍼(`frames`)는 비어 있다.
 
 ## 설정값 (생성자 키워드 인자)
 
@@ -123,12 +134,15 @@ tracker.close()                                        # 프로그램 끝날 때
 | `lost_seconds` | 0.5 | 기록 중 손이 이 시간 이상 안 보이면 취소 |
 | `alpha` | 0.5 | 좌표 떨림 보정(EMA) 계수. 1.0이면 보정 없음 |
 | `min_folded` | 3 | 주먹 판정: 엄지 제외 접힌 손가락 수 |
+| `anchor` | `"index_tip"` | 커서 기준점. `"index_tip"` = 검지 끝(랜드마크 8), `"palm"` = 손바닥 중심 |
+| `clip_mode` | `"crop"` | 기록 중 모을 프레임. `"crop"` = 검지 끝 주변, `"quarter"` = 카메라 프레임 1/4 축소본, `None` = 모으지 않음 |
+| `crop_size` | 128 | `"crop"`일 때 잘라 낼 크기 (카메라 프레임 픽셀) |
 | `mirror` | True | 좌우 반전 (셀카처럼) |
 | `panel_width` | 320 | 힌트 패널 폭 |
 | `model_path` | `models/hand_landmarker.task` | MediaPipe 모델 경로 |
 
 판정 기준
-- 위치: 손바닥 중심 = 랜드마크 0, 5, 9, 13, 17의 평균
+- 위치: 검지 끝 = 랜드마크 8 (`anchor="palm"`이면 랜드마크 0, 5, 9, 13, 17의 평균)
 - 주먹: 엄지를 뺀 네 손가락 중 `min_folded`개 이상이 접힘 (손가락 끝이 PIP 관절보다 손목에 가까우면 접힘)
 
 자세한 기준과 이유는 [docs/decisions.md](docs/decisions.md)에 있다.

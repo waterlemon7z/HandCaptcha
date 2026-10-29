@@ -2,7 +2,8 @@
 
 실행: python demo.py
 - 주먹을 쥐면 기록 시작 → 손을 움직임 → 1초 멈추면 완료(멈춘 위치에 초록 표시)
-- 이동 경로는 화면에 그리지 않고, 완료되면 recordings/ 에 이동 경로와 멈춘 위치를 각각 CSV로 저장
+- 이동 경로는 화면에 그리지 않고, 완료되면 recordings/ 에 이동 경로(보정·원본), 멈춘 위치,
+  손끝 프레임을 각각 따로 저장
 - 화면 아래 '다시하기' 버튼 클릭 또는 r: 리셋, q: 종료
 샘플 이미지(samples/problem.png, samples/hint.png)가 없으면 코드로 임시 생성한다.
 """
@@ -65,20 +66,25 @@ def load_images():
     return problem, hint
 
 
-def save_result(result) -> tuple[Path, Path]:
-    """이동 경로와 마지막 멈춘 위치를 각각 다른 CSV로 저장한다.
+def save_result(result) -> tuple[Path, Path, Path]:
+    """이동 경로, 마지막 멈춘 위치, 기록 중 프레임을 각각 다른 파일로 저장한다.
 
-    - path_날짜_시각.csv: 기록 시작부터 완료까지 움직인 경로 전체 (t, x, y)
+    - path_날짜_시각.csv: 기록 시작부터 완료까지 움직인 경로 전체 (t, x, y, raw_x, raw_y)
     - stop_날짜_시각.csv: 마지막에 멈춘 위치 한 점 (x, y)
+    - frames_날짜_시각.npz: 손끝 crop 이미지들(frames)과 각 시각(frame_timestamps)
     """
     RECORDINGS.mkdir(exist_ok=True)
     stamp = time.strftime("%Y%m%d_%H%M%S")
     path_file = RECORDINGS / f"path_{stamp}.csv"
     stop_file = RECORDINGS / f"stop_{stamp}.csv"
-    data = np.column_stack([result.timestamps, result.trajectory])
-    np.savetxt(path_file, data, delimiter=",", fmt=["%.3f", "%d", "%d"], header="t,x,y", comments="")
+    frames_file = RECORDINGS / f"frames_{stamp}.npz"
+    data = np.column_stack([result.timestamps, result.trajectory, result.raw_trajectory])
+    np.savetxt(path_file, data, delimiter=",", fmt=["%.3f"] + ["%d"] * 4,
+               header="t,x,y,raw_x,raw_y", comments="")
     np.savetxt(stop_file, [result.stop_position], delimiter=",", fmt="%d", header="x,y", comments="")
-    return path_file, stop_file
+    frames = np.stack(result.frames) if result.frames else np.empty((0, 0, 0, 3), np.uint8)
+    np.savez_compressed(frames_file, frames=frames, frame_timestamps=result.frame_timestamps)
+    return path_file, stop_file, frames_file
 
 
 def in_button(x: int, y: int) -> bool:
@@ -137,10 +143,11 @@ def main():
             cv2.rectangle(canvas, (0, 720 - PREVIEW_H), (PREVIEW_W - 1, 719), (255, 255, 255), 1)
 
             if result.state == STATE_DONE and not reported:
-                path_file, stop_file = save_result(result)
+                path_file, stop_file, frames_file = save_result(result)
                 print(f"완료: 멈춘 위치={result.stop_position} → {stop_file.name}")
-                print(f"      이동 경로 {len(result.trajectory)}점, {result.timestamps[-1]:.2f}초 "
-                      f"→ {path_file.name}")
+                print(f"      이동 경로 {len(result.trajectory)}점(보정·원본), "
+                      f"{result.timestamps[-1]:.2f}초 → {path_file.name}")
+                print(f"      손끝 프레임 {len(result.frames)}장 → {frames_file.name}")
                 reported = True
 
             # 버튼 줄은 render 화면 아래에 붙인다 (힌트 패널과 겹치지 않음)

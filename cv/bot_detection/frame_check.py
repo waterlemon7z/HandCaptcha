@@ -14,6 +14,8 @@ crop 창의 위치(카메라 픽셀)는 raw_trajectory를 거꾸로 환산해서
    0에 더 가까이 움직인 점을 손으로 보고, 그 이동 벡터들이 서로 얼마나 다른지(퍼짐)를 잰다.
    손 사진을 평행이동만 하는 합성은 퍼짐이 0에 가깝고, 진짜 손은 손가락마다 조금씩 달리 움직인다.
    → deform: 손 점 이동 벡터의 중앙값으로부터의 거리 중앙값 (px)
+   → affine_res: 손 점 이동을 회전+확대+이동 변환 하나(02-2 기하 변환)로 맞춘 뒤 남는 오차 중앙값 (px).
+      손 사진을 돌리고 키운 합성(S4)은 변환 하나로 설명돼 ≈0, 손가락마다 따로 굽는 진짜 손은 남는다
 """
 from __future__ import annotations
 
@@ -36,6 +38,7 @@ class FrameFeatures:
     noise_pairs: int            # ①에 쓴 쌍 수
     deform: float               # ② 손 점 이동 벡터 퍼짐 (px, nan = 쓸 쌍 없음)
     deform_pairs: int           # ②에 쓴 쌍 수
+    affine_res: float           # ② 손 점 이동을 회전·확대·이동 변환으로 맞춘 뒤 남는 오차 (px, nan = 쓸 쌍 없음)
 
     def as_dict(self) -> dict[str, float]:
         return asdict(self)
@@ -89,22 +92,35 @@ def track_corners(a: np.ndarray, b: np.ndarray) -> tuple[np.ndarray, np.ndarray]
     return p, fwd.reshape(-1, 2)[ok] - p
 
 
-def pair_deform(a: np.ndarray, b: np.ndarray, window_move: np.ndarray) -> float | None:
-    """한 쌍의 손 변형량. window_move = crop 창 이동 (crop 안 좌표, 좌우 반전 반영)."""
-    _, flow = track_corners(a, b)
+def affine_residual(src: np.ndarray, dst: np.ndarray) -> float:
+    """src→dst를 회전+확대+이동 변환 하나로 맞춘 뒤 남는 오차의 중앙값 (px).
+    LMEDS(오차 제곱의 중앙값 최소화)로 맞춰, 손으로 잘못 분류된 배경 점 몇 개에 변환이 끌려가지 않게 한다."""
+    m, _ = cv2.estimateAffinePartial2D(src.astype(np.float32), dst.astype(np.float32),
+                                       method=cv2.LMEDS)
+    if m is None:
+        return float("nan")
+    pred = src @ m[:, :2].T + m[:, 2]
+    return float(np.median(np.linalg.norm(pred - dst, axis=1)))
+
+
+def pair_deform(a: np.ndarray, b: np.ndarray, window_move: np.ndarray) -> tuple[float, float] | None:
+    """한 쌍의 (손 변형량, 변환 맞춤 오차). window_move = crop 창 이동 (crop 안 좌표, 좌우 반전 반영)."""
+    pts, flow = track_corners(a, b)
     if len(flow) == 0:
         return None
     bg_flow = -window_move
     # 0(손)에 더 가까운 점 = 창을 따라 움직인 손
-    hand = flow[np.linalg.norm(flow, axis=1) < np.linalg.norm(flow - bg_flow, axis=1)]
+    is_hand = np.linalg.norm(flow, axis=1) < np.linalg.norm(flow - bg_flow, axis=1)
+    hand, src = flow[is_hand], pts[is_hand]
     if len(hand) < MIN_HAND_POINTS:
         return None
-    return float(np.median(np.linalg.norm(hand - np.median(hand, axis=0), axis=1)))
+    spread = float(np.median(np.linalg.norm(hand - np.median(hand, axis=0), axis=1)))
+    return spread, affine_residual(src, src + hand)
 
 
-def deformation(frames, centers: np.ndarray, moving: np.ndarray) -> tuple[float, int]:
-    """이동 구간 쌍들의 손 변형량 중앙값."""
-    vals = []
+def deformation(frames, centers: np.ndarray, moving: np.ndarray) -> tuple[float, int, float]:
+    """이동 구간 쌍들의 (손 변형량 중앙값, 쓴 쌍 수, 변환 맞춤 오차 중앙값)."""
+    vals, res = [], []
     for k in range(len(frames) - 1):
         if not (moving[k] and moving[k + 1]):
             continue
@@ -114,8 +130,11 @@ def deformation(frames, centers: np.ndarray, moving: np.ndarray) -> tuple[float,
             continue
         v = pair_deform(frames[k], frames[k + 1], d)
         if v is not None:
-            vals.append(v)
-    return (float(np.median(vals)) if vals else float("nan")), len(vals)
+            vals.append(v[0])
+            res.append(v[1])
+    if not vals:
+        return float("nan"), 0, float("nan")
+    return float(np.median(vals)), len(vals), float(np.nanmedian(res))
 
 
 # ---------------------------------------------------------------- 특징
@@ -125,8 +144,8 @@ def extract(frames, raw_trajectory: np.ndarray, timestamps: np.ndarray, frame_si
     centers = crop_centers(raw, frame_size)
     dwell = split_dwell(raw, np.asarray(timestamps, dtype=np.float64))
     zr, zn = temporal_noise(frames, centers, dwell)
-    df, dn = deformation(frames, centers, ~dwell)
-    return FrameFeatures(zr, zn, df, dn)
+    df, dn, ar = deformation(frames, centers, ~dwell)
+    return FrameFeatures(zr, zn, df, dn, ar)
 
 
 if __name__ == "__main__":
@@ -145,12 +164,10 @@ if __name__ == "__main__":
         feat = extract(d["frames"], d["raw_trajectory"], d["timestamps"], tuple(d["frame_size"]))
         groups.setdefault(Path(f).parent.name, []).append(feat)
 
-    for name in ("zero_ratio", "deform"):
+    for name in ("zero_ratio", "deform", "affine_res"):
         print(name)
         for g, feats in groups.items():
             v = np.array([getattr(x, name) for x in feats])
             ok = v[~np.isnan(v)]
-            pairs = [getattr(x, name.split("_")[0] + "_pairs" if name == "deform" else "noise_pairs")
-                     for x in feats]
             rng = f"{ok.min():.3f} ~ {ok.max():.3f} (median {np.median(ok):.3f})" if len(ok) else "-"
-            print(f"  {g:6s} n={len(v):2d} 측정={len(ok):2d}  {rng}   쌍 수 중앙값 {np.median(pairs):.0f}")
+            print(f"  {g:6s} n={len(v):2d} 측정={len(ok):2d}  {rng}")

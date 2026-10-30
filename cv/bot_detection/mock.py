@@ -2,12 +2,13 @@
 
 손인식(HandTracker)의 HandResult와 같은 형식으로 만든다.
 - trajectory:     (N, 2) int32, 문제 이미지 픽셀 좌표 (0~W-1, 0~H-1), EMA 보정
-- raw_trajectory: (N, 2) int32, trajectory와 같은 프레임의 EMA 전 원본 좌표
+- raw_trajectory: (N, 2) float64, trajectory와 같은 프레임의 EMA 전 원본 좌표 (반올림 안 함)
 - timestamps:     (N,) float, 기록 시작부터의 초
 
 봇이 좌표를 만들어도 손인식을 거쳐서 들어온다고 보고 똑같이 처리한다
-(trajectory는 EMA + 반올림, raw_trajectory는 반올림만).
-모든 궤적은 "이동 → 목표에서 1초 이상 멈춤"으로 끝난다 (손인식 done 조건).
+(trajectory는 EMA + 반올림, raw_trajectory는 이미지 안으로 자르기만).
+모든 궤적은 "이동 → 목표에서 멈춤"이고, 손인식이 done을 내는 프레임에서 잘린다
+(최근 1초 동안 이동 범위 15px 미만이 되는 첫 프레임).
 
 봇 종류
 - linear:       등속 직선, 완전히 멈춤
@@ -34,7 +35,7 @@ class MockTrajectory:
     kind: str
     trajectory: np.ndarray      # (N, 2) int32, EMA 보정
     timestamps: np.ndarray      # (N,) 초
-    raw_trajectory: np.ndarray  # (N, 2) int32, EMA 전
+    raw_trajectory: np.ndarray  # (N, 2) float64, EMA 전
 
 
 # ---------------------------------------------------------------- 시간·점 생성
@@ -62,9 +63,13 @@ def min_jerk(s: np.ndarray) -> np.ndarray:
     return 10 * s**3 - 15 * s**4 + 6 * s**5
 
 
+def clip_to_image(points: np.ndarray) -> np.ndarray:
+    return np.clip(points, [0, 0], [WIDTH - 1, HEIGHT - 1]).astype(np.float64)
+
+
 def to_pixels(points: np.ndarray) -> np.ndarray:
     """이미지 안으로 자르고 int32로 반올림 (손인식 HandResult와 같게)."""
-    return np.rint(np.clip(points, [0, 0], [WIDTH - 1, HEIGHT - 1])).astype(np.int32)
+    return np.rint(clip_to_image(points)).astype(np.int32)
 
 
 def apply_tracker_pipeline(points: np.ndarray, alpha: float = ALPHA) -> tuple[np.ndarray, np.ndarray]:
@@ -73,7 +78,7 @@ def apply_tracker_pipeline(points: np.ndarray, alpha: float = ALPHA) -> tuple[np
     smoothed[0] = points[0]
     for i in range(1, len(points)):
         smoothed[i] = alpha * points[i] + (1 - alpha) * smoothed[i - 1]
-    return to_pixels(smoothed), to_pixels(points)
+    return to_pixels(smoothed), clip_to_image(points)
 
 
 # ---------------------------------------------------------------- 봇 종류별 경로 (보정 전 float)
@@ -134,7 +139,22 @@ def make_bot(kind: str, rng: np.random.Generator | int | None = None) -> MockTra
     rng = np.random.default_rng(rng)
     path = _PATHS[kind](rng)
     trajectory, raw = apply_tracker_pipeline(path)
-    return MockTrajectory(kind, trajectory, make_timestamps(len(path), rng), raw)
+    times = make_timestamps(len(path), rng)
+    n = done_index(trajectory, times) + 1
+    return MockTrajectory(kind, trajectory[:n], times[:n], raw[:n])
+
+
+def done_index(trajectory: np.ndarray, times: np.ndarray, stop_seconds: float = 1.0,
+               stop_pixels: float = 15.0) -> int:
+    """손인식이 done을 내는 첫 프레임 (최근 stop_seconds 동안 이동 범위 < stop_pixels).
+    손인식은 이 프레임에서 기록을 멈추므로 궤적도 여기서 끝난다."""
+    for i in range(len(times)):
+        if times[i] < stop_seconds - 1e-9:
+            continue
+        recent = trajectory[(times >= times[i] - stop_seconds - 1e-9) & (np.arange(len(times)) <= i)]
+        if np.ptp(recent, axis=0).max() < stop_pixels:
+            return i
+    return len(times) - 1
 
 
 def make_bots(n_per_kind: int = 10, seed: int = 0) -> list[MockTrajectory]:
@@ -146,7 +166,7 @@ def save_csv(mock: MockTrajectory, path: str | Path) -> None:
     """t,x,y,raw_x,raw_y CSV로 저장 (x,y = EMA 보정, raw_x,raw_y = EMA 전)."""
     data = np.column_stack([mock.timestamps, mock.trajectory, mock.raw_trajectory])
     np.savetxt(path, data, delimiter=",", header="t,x,y,raw_x,raw_y", comments="",
-               fmt=["%.6f", "%d", "%d", "%d", "%d"])
+               fmt=["%.6f", "%d", "%d", "%.4f", "%.4f"])
 
 
 def load_csv(path: str | Path) -> MockTrajectory:
@@ -154,7 +174,7 @@ def load_csv(path: str | Path) -> MockTrajectory:
     data = np.loadtxt(path, delimiter=",", skiprows=1, ndmin=2)
     kind = Path(path).stem.rsplit("_", 1)[0]
     return MockTrajectory(kind, data[:, 1:3].astype(np.int32), data[:, 0],
-                          data[:, 3:5].astype(np.int32))
+                          data[:, 3:5])
 
 
 if __name__ == "__main__":

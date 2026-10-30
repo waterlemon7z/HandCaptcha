@@ -220,3 +220,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 .idea/
+
+# 진위검출: 사람 손 녹화 (웹캠 crop 포함, 로컬에만 보관)
+cv/test/data/human/
+# 진위검출: 합성 봇 재료 사진·생성 결과 (웹캠 이미지 포함)
+cv/test/data/synth/

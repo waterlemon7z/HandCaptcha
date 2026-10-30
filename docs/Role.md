@@ -12,8 +12,13 @@
 - Output: 현재 손 좌표, 손 시리얼 데이터 (x, y), np.array(2D)
 
 ### 진위검출
-- Input: np.array(2D) 손 시리얼 데이터
-- Output: 봇여부 Boolean
+- Input: 손인식 `HandResult` (state == "done"일 때)
+  - `raw_trajectory` np.array (N, 2) float, EMA 보정 전 손 좌표 (문제 이미지 픽셀)
+  - `timestamps` np.array (N,), 기록 시작 = 0초
+  - `frames` 검지 끝 주변 crop 이미지 목록, `frame_size` 카메라 프레임 (w, h)
+- Output: (is_human: Boolean, reason: str)
+  - reason은 봇 판정 이유 (디버깅·발표용, 화면에는 띄우지 않기)
+- 호출: `check(result)` — `cv/bot_detection/detector.py`
 
 ### CV 입력
 - Input: 카메라

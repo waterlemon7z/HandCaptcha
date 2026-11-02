@@ -5,7 +5,7 @@ from threading import Lock
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 
 from backend.bot_detection import detector
-from cv.hand_tracking.hand_tracker import HandTracker
+from cv.hand_tracking.hand_tracker import HandTracker, get_stop_box
 from cv.problem_gen import ProblemGenerator
 
 
@@ -82,7 +82,7 @@ class TaskWorker(QObject):
                 # 완료 프레임을 보낸 뒤 한 번만 판정한다. 다음 generate()까지 화면을 유지한다.
                 # ***** 핵심 로직 *****
                 if result.state == "done" and result.box is not None:
-                    print(result.box)
+                    box = get_stop_box(result)
                     answer = self.generator.solve(self._problem_id, result.box)
                     self._problem_id = None
                     if answer["correct"]:

@@ -11,7 +11,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from hand_tracker import STATE_DONE, HandTracker, _draw_label
+from cv.hand_tracking.hand_tracker import STATE_DONE, HandTracker, _draw_label
 
 SAMPLES = Path(__file__).resolve().parent / "samples"
 WINDOW = "HandTracker demo"

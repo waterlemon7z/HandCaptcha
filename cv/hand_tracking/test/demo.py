@@ -90,7 +90,8 @@ def main():
         return
 
     problem, hint = load_images()
-    tracker = HandTracker(problem, hint)
+    tracker = HandTracker()
+    tracker.set_images(problem, hint)
     reported = False
     bar_width = tracker.width + tracker.panel_width
     bars = {done: make_button_bar(bar_width, done) for done in (False, True)}

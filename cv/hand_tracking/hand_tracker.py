@@ -106,8 +106,8 @@ def crop_around(frame: np.ndarray, center: tuple[float, float], size: int) -> np
 class HandTracker:
     def __init__(
         self,
-        problem_img: np.ndarray,
-        hint_img: np.ndarray,
+        problem_img: np.ndarray|None = None,
+        hint_img: np.ndarray|None = None,
         *,
         stop_seconds: float = 1.0,     # 이 시간 동안
         stop_pixels: float = 15.0,     # 이동 범위가 이 값 미만이면 멈춘 것으로 보고 done
@@ -145,13 +145,19 @@ class HandTracker:
 
     # ------------------------------------------------------------ 공개 API
 
-    def set_images(self, problem_img: np.ndarray, hint_img: np.ndarray) -> None:
-        """문제를 바꾼다. 상태도 초기화된다. 원본 배열은 수정하지 않는다."""
+    def set_images(self, problem_img: np.ndarray|None, hint_img: np.ndarray|None) -> None:
+        """문제를 바꾸고 초기화한다. 두 이미지가 모두 있어야 ready가 된다."""
+        self.ready = False
         self.problem_img = problem_img
         self.hint_img = hint_img
-        self.height, self.width = problem_img.shape[:2]
-        self._panel = self._build_hint_panel()
+        self.height = self.width = 0
+        self._panel = None
         self.reset()
+        if problem_img is not None and hint_img is not None:
+            print('No')
+            self.height, self.width = problem_img.shape[:2]
+            self._panel = self._build_hint_panel()
+            self.ready = True
 
     def reset(self) -> None:
         """다음 문제를 위해 초기화."""
@@ -162,17 +168,22 @@ class HandTracker:
         self._smoothed: Optional[tuple[float, float]] = None
         self._last_seen = 0.0
 
-    def process(self, frame: np.ndarray) -> HandResult:
-        """카메라 프레임(BGR) 한 장을 처리한다. 매 프레임 호출."""
+    def process(self, frame: np.ndarray) -> Optional[HandResult]:
+        """카메라 프레임(BGR) 한 장을 처리한다. 이미지 준비 전에는 None."""
+        if not self.ready:
+            return None
         t = time.monotonic()
         return self.process_landmarks(self._detect(frame, t), t, frame)
 
     def process_landmarks(self, landmarks, t: Optional[float] = None,
-                          frame: Optional[np.ndarray] = None) -> HandResult:
+                          frame: Optional[np.ndarray] = None) -> Optional[HandResult]:
         """손 랜드마크 21개(정규화 x, y) 또는 None으로 한 프레임을 처리한다.
 
         frame을 주면 카메라 프레임 크기를 기억하고, 기록 중인 프레임의 손끝 crop(또는 1/4 축소본)을 버퍼에 모은다.
+        이미지 준비 전에는 연산 없이 None을 반환한다.
         """
+        if not self.ready:
+            return None
         if frame is not None:
             self._frame_size = (int(frame.shape[1]), int(frame.shape[0]))
         if landmarks is None:
@@ -188,11 +199,14 @@ class HandTracker:
         return self.update(point, classify_hand(landmarks, self.min_folded), t, clip)
 
     def update(self, point: Optional[tuple[float, float]], hand_status: str,
-               t: Optional[float] = None, clip: Optional[np.ndarray] = None) -> HandResult:
+               t: Optional[float] = None, clip: Optional[np.ndarray] = None) -> Optional[HandResult]:
         """상태 머신. point는 문제 이미지 기준 원본 좌표(EMA 전), 손이 없으면 None.
 
         clip은 이 프레임의 손끝 crop(또는 축소본). 이 프레임이 궤적에 기록될 때만 버퍼에 들어간다.
+        이미지 준비 전에는 연산 없이 None을 반환한다.
         """
+        if not self.ready:
+            return None
         if t is None:
             t = time.monotonic()
 
@@ -226,12 +240,15 @@ class HandTracker:
         raw_position = None if raw is None else self._clip_to_image(raw)   # 원본은 float 그대로
         return self._result(self._to_pixel(point), raw_position, hand_status)
 
-    def render(self, result: HandResult) -> np.ndarray:
+    def render(self, result: HandResult) -> Optional[np.ndarray]:
         """사용자 화면: 왼쪽 문제 이미지(오버레이 포함) + 오른쪽 힌트 패널(항상 원본 그대로).
 
         궤적(이동 경로)과 경로 전체 box는 기록만 하고 화면에는 그리지 않는다.
         완료되면 마지막에 멈춘 위치만 초록 표시로 보여 준다.
+        이미지 준비 전에는 연산 없이 None을 반환한다.
         """
+        if not self.ready:
+            return None
         left = self.problem_img.copy()
         color = {STATE_IDLE: (200, 200, 200), STATE_RECORDING: (0, 140, 255),
                  STATE_DONE: (0, 200, 0)}[result.state]

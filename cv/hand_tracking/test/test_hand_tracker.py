@@ -33,6 +33,49 @@ def make_tracker(**kw):
     return HandTracker(*make_images(), **kw)
 
 
+def test_unready_tracker_skips_processing(monkeypatch):
+    tr = HandTracker()
+
+    def unexpected_detection(*args):
+        pytest.fail("이미지 준비 전에는 손 검출을 실행하면 안 됩니다")
+
+    monkeypatch.setattr(tr, "_detect", unexpected_detection)
+    assert not tr.ready
+    assert tr.process(None) is None
+    assert tr.process_landmarks([], frame=object()) is None
+    assert tr.update((100, 100), HAND_FIST, 0.0) is None
+    assert tr.render(None) is None
+    assert tr.state == STATE_IDLE
+    assert tr._points == []
+    assert tr._frame_size is None
+
+
+@pytest.mark.parametrize("missing", ["problem", "hint", "both"])
+def test_images_control_readiness_and_clear_previous_recording(missing):
+    tr = HandTracker()
+    problem, hint = make_images()
+    tr.set_images(problem, hint)
+    assert tr.ready
+    assert tr.update((100, 100), HAND_FIST, 0.0).state == STATE_RECORDING
+
+    tr.set_images(None if missing in ("problem", "both") else problem,
+                  None if missing in ("hint", "both") else hint)
+    assert not tr.ready
+    assert tr.state == STATE_IDLE
+    assert tr._points == []
+    assert tr._panel is None
+    assert tr.update((100, 100), HAND_FIST, 1.0) is None
+    assert tr.render(None) is None
+
+    tr.reset()
+    assert not tr.ready
+    tr.set_images(problem, hint)
+    assert tr.ready
+    result = tr.update(None, HAND_NONE, 2.0)
+    assert result.state == STATE_IDLE
+    assert tr.render(result).shape == (H, W + tr.panel_width, 3)
+
+
 def make_landmarks(cx=0.5, cy=0.5, folded=0):
     """손바닥 중심이 (cx, cy)이고 검지부터 folded개 손가락이 접힌 가짜 랜드마크 21개."""
     pts = [(cx, cy)] * 21

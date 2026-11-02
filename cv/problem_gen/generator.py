@@ -12,7 +12,7 @@ from .compose import fit_background, floor_map, place_object, transform_object
 
 OUTPUT_SIZE = (1280, 720)           # (w, h). 배경은 가운데를 잘라 이 크기로 맞춘다
 NUM_OBJECTS = 3                     # 문제마다 합성하는 물체 수. 이 중 1개가 정답, 나머지는 방해용
-OBJECT_SCALE_RANGE = (0.10, 0.16)   # 물체 긴 변(회전 전) / 배경 짧은 변
+OBJECT_SCALE_RANGE = (0.14, 0.20)   # 물체 긴 변(회전 전) / 배경 짧은 변 (약 100~144px). 작으면 손 박스와 IoU가 너무 낮게 나온다
 OBJECT_ANGLE_RANGE = (-45.0, 45.0)  # 물체 회전 각도(도)
 PLACE_MARGIN = 0.05                 # 가장자리에서 띄울 비율. 손으로 짚기 어려운 화면 끝을 피한다
 PLACE_CANDIDATES = 100              # 위치 후보 수. 자리는 비어 있고 주변은 복잡한 곳일수록 점수가 좋다
@@ -20,7 +20,9 @@ PLACE_TOP_K = 3                     # 점수 상위 몇 개 중에서 랜덤으�
 OCCLUDE_RANGE = (0.2, 0.45)         # 물체가 사진 속 물건 밑에 깔려 가려지는 비율 (최소, 최대)
 BLEND_LEVELS = 4                    # 피라미드 단계 상한 (작은 물체는 자동으로 줄임)
 BLEND_FEATHER_SIGMA = 2.0           # 블렌딩 마스크를 흐리는 정도(px). 0이면 alpha 그대로
-HIT_IOU = 0.1                       # 입력 박스와 정답 박스의 IoU가 이 이상이면 정답
+HIT_IOU = 0.3                       # 입력 박스와 정답 박스(원래 또는 넓힌 것)의 IoU가 이 이상이면 정답
+MIN_ANSWER_SIDE_PX = 48             # 정답으로 고를 물체의 보이는 부분 박스 짧은 변 최소값. 없으면 가장 큰 물체를 정답으로
+HIT_PAD_PX = 16                    # 손으로 그린 박스는 물체보다 크게 잡히기 쉬우므로, 판정할 때 정답 박스를 사방으로 넓히는 픽셀 수
 
 
 @dataclass
@@ -41,7 +43,10 @@ def _iou(a, b):
 
 
 def _hit(answer_box, box):
-    return _iou(answer_box, box) >= HIT_IOU
+    # 크게 그린 박스는 넓힌 정답 박스와, 물체 안쪽에 작게 그린 박스는 원래 정답 박스와 더 잘 맞으므로 둘 중 큰 IoU로 본다
+    x1, y1, x2, y2 = answer_box
+    p = HIT_PAD_PX
+    return max(_iou(answer_box, box), _iou((x1 - p, y1 - p, x2 + p, y2 + p), box)) >= HIT_IOU
 
 
 def blend_object(composite, bg, alpha, feather_sigma=BLEND_FEATHER_SIGMA):
@@ -117,7 +122,7 @@ class ProblemGenerator:
         return problem_id, image, target
 
     def solve(self, problem_id, box):
-        """box(합성 이미지 기준 (x1, y1, x2, y2))가 정답 물체의 박스와 HIT_IOU 이상 겹치면 정답.
+        """box(합성 이미지 기준 (x1, y1, x2, y2))가 정답 물체의 박스(원래 또는 사방으로 HIT_PAD_PX 넓힌 것)와 IoU가 HIT_IOU 이상이면 정답.
 
         봇이든 사람이든 같은 기준이다. 한 번 판정한 문제는 폐기하고, 맞든 틀리든 정답을 공개한다.
         """
@@ -155,8 +160,12 @@ class ProblemGenerator:
             occupied |= mask > 0
             masks.append(mask)
 
-        i = int(rng.integers(NUM_OBJECTS))
-        x, y, w, h = cv2.boundingRect(masks[i])
+        # 붓처럼 가늘거나 많이 가려진 물체는 정답 박스가 작아 손 박스와 IoU가 낮게 나오므로 방해용으로만 쓴다
+        rects = [cv2.boundingRect(m) for m in masks]
+        sides = [min(w, h) for _, _, w, h in rects]
+        big_enough = [k for k, s in enumerate(sides) if s >= MIN_ANSWER_SIDE_PX]
+        i = int(big_enough[rng.integers(len(big_enough))]) if big_enough else int(np.argmax(sides))
+        x, y, w, h = rects[i]
         return image, objects[i], _Answer((x, y, x + w, y + h), masks[i])
 
 if __name__ == '__main__':

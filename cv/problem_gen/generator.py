@@ -158,3 +158,10 @@ class ProblemGenerator:
         i = int(rng.integers(NUM_OBJECTS))
         x, y, w, h = cv2.boundingRect(masks[i])
         return image, objects[i], _Answer((x, y, x + w, y + h), masks[i])
+
+if __name__ == '__main__':
+    pg = ProblemGenerator()
+    id, img, tar = pg.create()
+    print(id)
+    cv2.imshow("test", img)
+    cv2.waitKey(0)

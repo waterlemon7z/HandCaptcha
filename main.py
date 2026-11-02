@@ -1,21 +1,22 @@
 import sys
 
+import cv2
 from PySide6.QtWidgets import QApplication
 
 from backend.mock import (
-    MockBotDetector, MockDifficultyChecker, MockHandRecognizer, MockProblemGenerator,
+    MockBotDetector, MockDifficultyChecker, MockHandRecognizer,
 )
 from backend.worker import TaskWorker
 from cv.camera import Camera
+from cv.problem_gen import ProblemGenerator
 from gui.controller import Controller
 from gui.signal import HandCaptchaUI
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = HandCaptchaUI()
     recognizer = MockHandRecognizer()
-    generator = MockProblemGenerator()
+    generator = ProblemGenerator()
     difficulty_checker = MockDifficultyChecker()
     bot_detector = MockBotDetector()
     camera = Camera(recognizer=recognizer)

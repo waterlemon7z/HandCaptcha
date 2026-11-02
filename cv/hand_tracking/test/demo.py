@@ -1,7 +1,7 @@
 """손인식 데모.
 
 실행: python demo.py
-- 주먹을 쥐면 기록 시작 → 손을 움직임 → 1초 멈추면 완료(멈춘 위치에 초록 표시)
+- 주먹을 쥐었다가 검지를 펴면 기록 시작 → 손을 움직임 → 1초 멈추면 완료(멈춘 위치에 초록 표시)
 - 이동 경로는 화면에 그리지 않는다. 완료되면 결과 요약만 터미널에 출력 (파일로 저장하지 않음)
 - 화면 아래 '다시하기' 버튼 클릭 또는 r: 리셋, q: 종료
 샘플 이미지(samples/problem.png, samples/hint.png)가 없으면 코드로 임시 생성한다.
@@ -77,8 +77,8 @@ def make_button_bar(width: int, done: bool) -> np.ndarray:
     cv2.rectangle(bar, (x1, y1), (x2, y2), (255, 255, 255), 1)
     _draw_label(bar, "다시하기 (R)", "RETRY (R)", ((x1 + x2) // 2, (y1 + y2) // 2))
     msg = ("완료! 다시 하려면 버튼을 누르세요" if done
-           else "주먹을 쥐면 기록 시작, 1초 멈추면 완료")
-    _draw_label(bar, msg, "Done! Click RETRY" if done else "Make a fist to start",
+           else "주먹을 쥐었다가 검지를 펴면 기록 시작, 1초 멈추면 완료")
+    _draw_label(bar, msg, "Done! Click RETRY" if done else "Fist, then point to start",
                 (x2 + 30, (y1 + y2) // 2), align_left=True)
     return bar
 

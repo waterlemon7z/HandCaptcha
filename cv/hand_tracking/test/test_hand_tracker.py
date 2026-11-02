@@ -13,6 +13,7 @@ from hand_tracker import (
     classify_hand,
     count_folded_fingers,
     crop_around,
+    index_extended,
     index_tip,
     palm_center,
 )
@@ -30,6 +31,7 @@ def make_images():
 
 def make_tracker(**kw):
     kw.setdefault("alpha", 1.0)  # 기본은 보정 없이 (좌표를 그대로 비교하려고)
+    kw.setdefault("start_gesture", "fist")  # 상태 머신 테스트는 주먹 한 번으로 시작 (검지 펴기 시작은 따로 테스트)
     return HandTracker(*make_images(), **kw)
 
 
@@ -52,7 +54,7 @@ def test_unready_tracker_skips_processing(monkeypatch):
 
 @pytest.mark.parametrize("missing", ["problem", "hint", "both"])
 def test_images_control_readiness_and_clear_previous_recording(missing):
-    tr = HandTracker()
+    tr = HandTracker(start_gesture="fist")   # 주먹 한 번으로 기록을 시작해 초기화를 확인
     problem, hint = make_images()
     tr.set_images(problem, hint)
     assert tr.ready
@@ -76,8 +78,11 @@ def test_images_control_readiness_and_clear_previous_recording(missing):
     assert tr.render(result).shape == (H, W + tr.panel_width, 3)
 
 
-def make_landmarks(cx=0.5, cy=0.5, folded=0):
-    """손바닥 중심이 (cx, cy)이고 검지부터 folded개 손가락이 접힌 가짜 랜드마크 21개."""
+def make_landmarks(cx=0.5, cy=0.5, folded=0, index_up=False):
+    """손바닥 중심이 (cx, cy)이고 검지부터 folded개 손가락이 접힌 가짜 랜드마크 21개.
+
+    index_up=True면 검지만 편다 (folded=4와 함께 쓰면 검지만 편 '가리키기' 손).
+    """
     pts = [(cx, cy)] * 21
     pts = [list(p) for p in pts]
     pts[0] = [cx, cy + 0.2]                       # 손목
@@ -88,6 +93,8 @@ def make_landmarks(cx=0.5, cy=0.5, folded=0):
         pts[pip + 1] = [mcp_x[i], cy - 0.13]      # DIP
         # 펴진 손가락: 끝이 PIP보다 멀리 / 접힌 손가락: 끝이 손바닥 쪽으로
         pts[tip] = [mcp_x[i], cy + 0.02] if i < folded else [mcp_x[i], cy - 0.16]
+    if index_up:
+        pts[8] = [mcp_x[0], cy - 0.16]
     return [tuple(p) for p in pts]
 
 
@@ -163,6 +170,122 @@ def test_fist_landmarks_start_recording():
     r = tr.process_landmarks(make_landmarks(folded=4), t=0.0)
     assert r.state == STATE_RECORDING
     assert len(r.trajectory) == 1
+
+
+# ---------------------------------------------------------------- 시작 손동작: 주먹 → 검지 펴기 (기본)
+
+def make_point_tracker(**kw):
+    return make_tracker(start_gesture="point", **kw)
+
+
+def test_index_extended():
+    assert not index_extended(make_landmarks(folded=4))
+    assert index_extended(make_landmarks(folded=4, index_up=True))
+    assert index_extended(make_landmarks(folded=0))
+
+
+def test_default_start_gesture_is_point():
+    assert HandTracker(*make_images()).start_gesture == "point"
+
+
+def test_bad_start_gesture():
+    with pytest.raises(ValueError):
+        make_tracker(start_gesture="wave")
+
+
+def test_point_fist_alone_does_not_start():
+    tr = make_point_tracker()
+    for i in range(40):
+        r = tr.process_landmarks(make_landmarks(folded=4), t=i * DT)
+    assert r.state == STATE_IDLE
+    assert len(r.trajectory) == 0
+
+
+def test_point_fist_then_index_up_starts():
+    tr = make_point_tracker()
+    tr.process_landmarks(make_landmarks(folded=4), t=0.0)
+    r = tr.process_landmarks(make_landmarks(folded=4, index_up=True), t=DT)
+    assert r.state == STATE_RECORDING
+    assert len(r.trajectory) == 1
+    assert r.trajectory[0].tolist() == list(r.position)       # 첫 점 = 편 검지 끝
+    assert r.timestamps[0] == 0.0
+
+
+def test_point_open_hand_from_fist_also_starts():
+    """주먹에서 손 전체를 펴도 검지가 펴진 것이므로 시작한다."""
+    tr = make_point_tracker()
+    tr.process_landmarks(make_landmarks(folded=4), t=0.0)
+    r = tr.process_landmarks(make_landmarks(folded=0), t=DT)
+    assert r.state == STATE_RECORDING
+
+
+def test_point_without_fist_first_does_not_start():
+    """처음부터 검지를 편 손(가리키기, 편 손)은 시작하지 않는다."""
+    tr = make_point_tracker()
+    for i in range(10):
+        tr.process_landmarks(make_landmarks(folded=4, index_up=True), t=i * DT)
+        r = tr.process_landmarks(make_landmarks(folded=0), t=(i + 0.5) * DT)
+    assert r.state == STATE_IDLE
+
+
+def test_point_fist_with_index_up_does_not_arm():
+    """검지만 편 손은 hand_status가 fist(3개 접힘)여도 준비 상태가 되지 않는다."""
+    tr = make_point_tracker()
+    r = tr.process_landmarks(make_landmarks(folded=4, index_up=True), t=0.0)
+    assert r.hand_status == HAND_FIST
+    r = tr.process_landmarks(make_landmarks(folded=4, index_up=True), t=DT)
+    assert r.state == STATE_IDLE
+
+
+def test_point_lost_hand_disarms():
+    """주먹 뒤 손을 놓치면 다시 주먹부터 해야 한다."""
+    tr = make_point_tracker()
+    tr.process_landmarks(make_landmarks(folded=4), t=0.0)
+    tr.process_landmarks(None, t=DT)
+    r = tr.process_landmarks(make_landmarks(folded=4, index_up=True), t=2 * DT)
+    assert r.state == STATE_IDLE
+
+
+def test_point_fist_on_hint_panel_does_not_arm():
+    tr = make_point_tracker()
+    tr.update((W + 100, 300), HAND_FIST, 0.0, index_up=False)
+    r = tr.update((500, 300), HAND_FIST, DT, index_up=True)
+    assert r.state == STATE_IDLE
+
+
+def test_point_reset_disarms():
+    tr = make_point_tracker()
+    tr.process_landmarks(make_landmarks(folded=4), t=0.0)
+    tr.reset()
+    r = tr.process_landmarks(make_landmarks(folded=4, index_up=True), t=DT)
+    assert r.state == STATE_IDLE
+
+
+def test_point_update_without_index_up_uses_hand_status():
+    """update()만 쓸 때는 fist → open으로 시작한다."""
+    tr = make_point_tracker()
+    tr.update((500, 300), HAND_FIST, 0.0)
+    r = tr.update((510, 300), HAND_OPEN, DT)
+    assert r.state == STATE_RECORDING
+    assert r.trajectory[0].tolist() == [510, 300]
+
+
+def test_point_full_flow_to_done():
+    tr = make_point_tracker()
+    tr.process_landmarks(make_landmarks(0.3, 0.5, folded=4), t=0.0)
+    t = DT
+    for i in range(20):                                         # 검지를 펴고 이동
+        tr.process_landmarks(make_landmarks(0.3 + i * 0.01, 0.5, folded=4, index_up=True), t=t)
+        t += DT
+    for _ in range(32):                                         # 1초 이상 멈춤
+        r = tr.process_landmarks(make_landmarks(0.49, 0.5, folded=4, index_up=True), t=t)
+        t += DT
+    assert r.state == STATE_DONE
+    assert r.stop_position is not None
+    # 다음 시도도 주먹부터
+    tr.reset()
+    r = tr.process_landmarks(make_landmarks(0.49, 0.5, folded=4, index_up=True), t=t)
+    assert r.state == STATE_IDLE
 
 
 # ---------------------------------------------------------------- 상태 전환
@@ -450,7 +573,7 @@ def test_render_hint_panel_shows_resized_hint():
 def test_render_does_not_modify_originals():
     problem, hint = make_images()
     p0, h0 = problem.copy(), hint.copy()
-    tr = HandTracker(problem, hint, alpha=1.0)
+    tr = HandTracker(problem, hint, alpha=1.0, start_gesture="fist")
     tr.render(busy_result(tr))
     assert np.array_equal(problem, p0)
     assert np.array_equal(hint, h0)

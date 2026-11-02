@@ -21,8 +21,15 @@ import math
 
 import numpy as np
 
-from cv.bot_detection import frame_check, trajectory
+from backend.bot_detection import frame_check, trajectory
 
+# 저장된 데이터 전체 판정
+import glob
+from collections import Counter
+from pathlib import Path
+
+from backend.bot_detection.mock import load_csv
+from backend.bot_detection.record import load_recording
 JITTER_MIN = 0.5        # 멈춤 구간 떨림(px)이 이보다 작으면 봇. 사람 최소 0.70
 STRAIGHT_MAX = 0.9      # 경로 곧음이 이보다 크고
 LAG1_MIN = -0.2         #   떨림 자기상관이 이보다 작으면 봇. 사람 중 둘 다 해당 없음
@@ -64,13 +71,6 @@ def check_arrays(raw_trajectory, timestamps, frames, frame_size) -> tuple[bool, 
 
 
 if __name__ == "__main__":
-    # 저장된 데이터 전체 판정
-    import glob
-    from collections import Counter
-    from pathlib import Path
-
-    from cv.bot_detection.mock import load_csv
-    from cv.bot_detection.record import load_recording
 
     data_dir = Path(__file__).resolve().parents[1] / "test" / "data"
     results: dict[str, list[tuple[str, bool, str]]] = {}

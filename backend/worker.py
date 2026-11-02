@@ -47,9 +47,14 @@ class TaskWorker(QObject):
                 return
             result = self.tracker.process(frame)
             if result.state == 'done':
-                print(f"완료: 멈춘 위치={result.box}, 이동 경로 {len(result.trajectory)}점 "
-                      f"{result.timestamps[-1]:.2f}초, 손끝 프레임 {len(result.frames)}장")
-                exit(0)
+                x, y = result.stop_position
+                box = (x, y, x+100, y+100)
+                print(box)
+                ret = self.generator.solve(self._problem_id, box)
+                if ret['correct']:
+                    print('pass | now check integrity')
+
+
 
             if result is not None and not self._cancelled():
                 canvas = self.tracker.render(result)

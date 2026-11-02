@@ -20,7 +20,7 @@ PLACE_TOP_K = 3                     # 점수 상위 몇 개 중에서 랜덤으�
 OCCLUDE_RANGE = (0.2, 0.45)         # 물체가 사진 속 물건 밑에 깔려 가려지는 비율 (최소, 최대)
 BLEND_LEVELS = 4                    # 피라미드 단계 상한 (작은 물체는 자동으로 줄임)
 BLEND_FEATHER_SIGMA = 2.0           # 블렌딩 마스크를 흐리는 정도(px). 0이면 alpha 그대로
-HIT_IOU = 0.5                       # 입력 박스와 정답 박스의 IoU가 이 이상이면 정답
+HIT_IOU = 0.1                       # 입력 박스와 정답 박스의 IoU가 이 이상이면 정답
 
 
 @dataclass

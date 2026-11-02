@@ -225,3 +225,4 @@ __marimo__/
 cv/test/data/human/
 # 진위검출: 합성 봇 재료 사진·생성 결과 (웹캠 이미지 포함)
 cv/test/data/synth/
+!/cv/hand_tracking/CLAUDE.md

@@ -1,7 +1,7 @@
 """손인식 모듈.
 
 카메라 프레임에서 손을 찾아 문제 이미지(1280×720) 좌표로 바꾸고,
-주먹을 쥐면 궤적 기록을 시작해 손이 1초 멈추면 완료한다.
+주먹을 쥐었다가 검지를 펴면 궤적 기록을 시작해 손이 1초 멈추면 완료한다.
 
 구조
 - 랜드마크 → (위치, 손 상태): index_tip(), palm_center(), classify_hand()   ← 순수 함수
@@ -76,15 +76,22 @@ def palm_center(landmarks) -> tuple[float, float]:
     return float(x), float(y)
 
 
-def count_folded_fingers(landmarks) -> int:
-    """엄지를 뺀 네 손가락 중 접힌 개수. 손가락 끝이 PIP 관절보다 손목에 가까우면 접힘."""
+def folded_fingers(landmarks) -> list[bool]:
+    """검지, 중지, 약지, 소지 각각 접혔는지. 손가락 끝이 PIP 관절보다 손목에 가까우면 접힘."""
     pts = np.asarray(landmarks, dtype=float)[:, :2]
     wrist = pts[WRIST]
-    folded = 0
-    for tip, pip in FINGERS:
-        if np.linalg.norm(pts[tip] - wrist) < np.linalg.norm(pts[pip] - wrist):
-            folded += 1
-    return folded
+    return [bool(np.linalg.norm(pts[tip] - wrist) < np.linalg.norm(pts[pip] - wrist))
+            for tip, pip in FINGERS]
+
+
+def count_folded_fingers(landmarks) -> int:
+    """엄지를 뺀 네 손가락 중 접힌 개수."""
+    return sum(folded_fingers(landmarks))
+
+
+def index_extended(landmarks) -> bool:
+    """검지가 펴졌는가."""
+    return not folded_fingers(landmarks)[0]
 
 
 def classify_hand(landmarks, min_folded: int = 3) -> str:
@@ -114,6 +121,7 @@ class HandTracker:
         lost_seconds: float = 0.5,     # recording 중 손이 이만큼 안 보이면 기록 취소
         alpha: float = 0.5,            # EMA 계수 (1.0이면 보정 없음)
         min_folded: int = 3,           # 주먹 판정: 접힌 손가락 수
+        start_gesture: str = "point",  # 기록 시작: "point"(주먹 쥔 뒤 검지를 폄) | "fist"(주먹을 쥠)
         anchor: str = "index_tip",     # 커서 기준점: "index_tip"(검지 끝, 랜드마크 8) | "palm"(손바닥 중심)
         clip_mode: Optional[str] = "crop",  # 기록 중 모을 프레임: "crop"(손끝 주변) | "quarter"(1/4 축소본) | None(안 모음)
         crop_size: int = 128,          # clip_mode="crop"일 때 잘라 낼 크기 (카메라 프레임 픽셀)
@@ -127,6 +135,9 @@ class HandTracker:
             raise ValueError('anchor는 "index_tip" 또는 "palm"이어야 합니다')
         if clip_mode not in ("crop", "quarter", None):
             raise ValueError('clip_mode는 "crop", "quarter", None 중 하나여야 합니다')
+        if start_gesture not in ("point", "fist"):
+            raise ValueError('start_gesture는 "point" 또는 "fist"여야 합니다')
+        self.start_gesture = start_gesture
         self.stop_seconds = stop_seconds
         self.stop_pixels = stop_pixels
         self.lost_seconds = lost_seconds
@@ -167,6 +178,7 @@ class HandTracker:
         self._stop: Optional[tuple[int, int]] = None
         self._smoothed: Optional[tuple[float, float]] = None
         self._last_seen = 0.0
+        self._armed = False             # start_gesture="point": 검지까지 접은 주먹을 봤는가 (검지를 펴면 시작)
 
     def process(self, frame: np.ndarray) -> Optional[HandResult]:
         """카메라 프레임(BGR) 한 장을 처리한다. 이미지 준비 전에는 None."""
@@ -196,13 +208,16 @@ class HandTracker:
         clip = None
         if frame is not None and self.clip_mode is not None and self.state != STATE_DONE:
             clip = self._make_clip(frame, landmarks)
-        return self.update(point, classify_hand(landmarks, self.min_folded), t, clip)
+        return self.update(point, classify_hand(landmarks, self.min_folded), t, clip,
+                           index_up=index_extended(landmarks))
 
     def update(self, point: Optional[tuple[float, float]], hand_status: str,
-               t: Optional[float] = None, clip: Optional[np.ndarray] = None) -> Optional[HandResult]:
+               t: Optional[float] = None, clip: Optional[np.ndarray] = None,
+               index_up: Optional[bool] = None) -> Optional[HandResult]:
         """상태 머신. point는 문제 이미지 기준 원본 좌표(EMA 전), 손이 없으면 None.
 
         clip은 이 프레임의 손끝 crop(또는 축소본). 이 프레임이 궤적에 기록될 때만 버퍼에 들어간다.
+        index_up은 검지가 펴졌는지. None이면 hand_status로 짐작한다 ("open"이면 펴짐).
         이미지 준비 전에는 연산 없이 None을 반환한다.
         """
         if not self.ready:
@@ -220,8 +235,11 @@ class HandTracker:
         if point is not None and not self._inside(point):
             point = raw = None
 
+        if index_up is None:
+            index_up = hand_status == HAND_OPEN
+
         if self.state == STATE_IDLE:
-            if point is not None and hand_status == HAND_FIST:
+            if self._start_gesture(point, hand_status, index_up):
                 self.state = STATE_RECORDING
                 self._add(point, raw, t, clip)
         elif self.state == STATE_RECORDING:
@@ -326,6 +344,21 @@ class HandTracker:
             tx, ty = index_tip(landmarks)
             clip = crop_around(frame, (tx * (w - 1), ty * (h - 1)), self.crop_size)
         return cv2.flip(clip, 1) if self.mirror else clip
+
+    def _start_gesture(self, point, hand_status: str, index_up: bool) -> bool:
+        """idle에서 기록을 시작할 손동작인가. point가 None(손 없음, 문제 이미지 밖)이면 시작 안 함."""
+        if point is None:
+            self._armed = False          # 손을 놓치면 주먹부터 다시
+            return False
+        if self.start_gesture == "fist":
+            return hand_status == HAND_FIST
+        # "point": 검지까지 접은 주먹을 본 뒤, 검지가 펴지는 순간 시작
+        if hand_status == HAND_FIST and not index_up:
+            self._armed = True
+        elif self._armed and index_up:
+            self._armed = False
+            return True
+        return False
 
     def _stopped(self, t: float) -> bool:
         """최근 stop_seconds 동안의 이동 범위(가로·세로 중 큰 값)가 stop_pixels 미만인가."""

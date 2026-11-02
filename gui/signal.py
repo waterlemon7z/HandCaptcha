@@ -31,6 +31,7 @@ class HandCaptchaUI(QMainWindow):
         self.hand_item.setZValue(1)
         self.hand_item.hide()
 
+        self._fitting_image = False
         self.connect_events()
 
     def connect_events(self):
@@ -60,7 +61,7 @@ class HandCaptchaUI(QMainWindow):
         ).copy()
         self.image_item.setPixmap(QPixmap.fromImage(qimage))
         self.scene.setSceneRect(0, 0, width, height)
-        self.ui.bigImg.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self._fit_captcha()
 
     @Slot(str)
     def set_status(self, text: str):
@@ -84,10 +85,41 @@ class HandCaptchaUI(QMainWindow):
         self.reference_scene.setSceneRect(0, 0, width, height)
         self.ui.smallImg.fitInView(self.reference_scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
+    def _fit_captcha(self):
+        if self._fitting_image or self.scene.sceneRect().isEmpty():
+            return
+        self._fitting_image = True
+        try:
+            view = self.ui.bigImg
+            rect = self.scene.sceneRect()
+            # 이미지 비율에 맞춰 표시 상자와 창 높이를 함께 줄인다.
+            border_height = view.height() - view.viewport().height()
+            target_height = round(view.viewport().width() * rect.height() / rect.width()) + border_height
+            view.setFixedHeight(target_height)
+            card_margins = self.ui.cardLayout.contentsMargins()
+            root_margins = self.ui.rootLayout.contentsMargins()
+            other_height = sum(max(widget.minimumHeight(), widget.sizeHint().height())
+                               for widget in (self.ui.headerFrame, self.ui.footerWidget))
+            window_height = (target_height + other_height
+                             + card_margins.top() + card_margins.bottom()
+                             + root_margins.top() + root_margins.bottom()
+                             + 2 * self.ui.captchaCard.frameWidth()
+                             + 2 * self.ui.cardLayout.spacing())
+            self.setFixedHeight(window_height)
+            self.ui.centralwidget.layout().activate()
+            self.ui.cardLayout.activate()
+            # fitInView가 추가하는 내부 여백 없이 viewport에 맞춘다.
+            view.resetTransform()
+            scale = min(view.viewport().width() / rect.width(),
+                        view.viewport().height() / rect.height())
+            view.scale(scale, scale)
+        finally:
+            self._fitting_image = False
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if not self.scene.sceneRect().isEmpty():
-            self.ui.bigImg.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        if hasattr(self, "_fitting_image"):
+            self._fit_captcha()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

@@ -1,3 +1,4 @@
+import cv2
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 
 
@@ -13,7 +14,7 @@ class Controller(QObject):
         self.latest_frame = None
         self.position = None
         self.serial = None
-        self.captcha = None
+        self.captcha = None # 실제 captcha 이미지
         self.regions = []
         self.state = "READY"
         self._request_id = 0
@@ -59,33 +60,64 @@ class Controller(QObject):
 
     @Slot(object)
     def on_frame(self, frame):
+        """
+        여기서 캡챠 그림 합성
+        :param frame:
+        :return:
+        """
         if self._closing:
             return
         self.latest_frame = frame
-        if self.state in ("READY", "GENERATING", "CAMERA_ERROR", "ERROR"):
+        if self.captcha is None:
             self.view.set_captcha(frame)
+            return
+        height, width = self.captcha.shape[:2]
+        left, top, crop_width, crop_height = self._camera_crop_bounds(frame)
+        camera = frame[top:top + crop_height, left:left + crop_width]
+        # 화면 비율은 crop으로 맞추고, 합성에 필요한 픽셀 크기만 맞춘다.
+        if camera.shape[:2] != (height, width):
+            camera = cv2.resize(camera, (width, height))
+
+        blended = cv2.addWeighted(
+            camera, 0.,
+            self.captcha, 1.,
+            0,
+        )
+        self.view.set_captcha(blended)
+
+    def _camera_crop_bounds(self, frame):
+        height, width = frame.shape[:2]
+        target_height, target_width = self.captcha.shape[:2]
+        if width * target_height > height * target_width:
+            crop_height = height
+            crop_width = max(1, height * target_width // target_height)
+        else:
+            crop_width = width
+            crop_height = max(1, width * target_height // target_width)
+        return ((width - crop_width) // 2, (height - crop_height) // 2,
+                crop_width, crop_height)
 
     @Slot(object, object)
     def on_hand(self, position, serial):
         if self._closing:
             return
+        # 합성 영상과 동일한 crop/배율을 손 좌표에도 적용한다.
+        if position is not None and self.captcha is not None and self.latest_frame is not None:
+            left, top, width, height = self._camera_crop_bounds(self.latest_frame)
+            x, y = position[0] - left, position[1] - top
+            if 0 <= x < width and 0 <= y < height:
+                ch, cw = self.captcha.shape[:2]
+                position = (x * cw / width, y * ch / height)
+            else:
+                position = None
         self.position = position
         self.serial = serial
         if position is None:
             self.view.set_hand_position(None, None)
             if self.state == "SOLVING":
                 self._set_state("READY")
-                if self.latest_frame is not None:
-                    self.view.set_captcha(self.latest_frame)
             return
-        # CV 좌표를 표시 중인 CAPTCHA 이미지 좌표로 변환한다.
-        if self.captcha is not None and self.latest_frame is not None:
-            h, w = self.latest_frame.shape[:2]
-            ch, cw = self.captcha.shape[:2]
-            self.position = (position[0] * cw / w, position[1] * ch / h)
         if self.state in ("READY", "SOLVING") and self.captcha is not None:
-            if self.state == "READY":
-                self.view.set_captcha(self.captcha)
             self._set_state("SOLVING")
             self.view.set_hand_position(*self.position)
 
@@ -116,7 +148,7 @@ class Controller(QObject):
         self.regions = regions
         self.view.set_reference(small)
         if self.latest_frame is not None:
-            self.view.set_captcha(self.latest_frame)
+            self.on_frame(self.latest_frame)
         self._set_state("CAMERA_ERROR" if self._camera_failed else "READY")
         if self.position is not None:
             # 다음 CV 이벤트가 변환된 좌표와 함께 SOLVING으로 전환한다.

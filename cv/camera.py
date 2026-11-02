@@ -10,7 +10,7 @@ class Camera(QObject):
     error_occurred = Signal(str)
     finished = Signal()
 
-    def __init__(self, device_index=0, width=640, height=480, parent=None,
+    def __init__(self, device_index=0, width=1280, height=720, parent=None,
                  recognizer=None, capture_factory=None):
         super().__init__(parent)
         self.device_index = device_index

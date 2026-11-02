@@ -1,6 +1,8 @@
 """문제생성 → 난이도검수 및 정답/봇 검사를 직렬 실행하는 Task Worker."""
-
+import cv2
 from PySide6.QtCore import QObject, QThread, Signal, Slot
+
+from cv.problem_gen import ProblemGenerator
 
 
 class TaskWorker(QObject):
@@ -10,7 +12,7 @@ class TaskWorker(QObject):
 
     def __init__(self, generator, difficulty_checker, bot_detector, parent=None):
         super().__init__(parent)
-        self.generator = generator
+        self.generator:ProblemGenerator = generator
         self.difficulty_checker = difficulty_checker
         self.bot_detector = bot_detector
 
@@ -22,10 +24,10 @@ class TaskWorker(QObject):
         if self._cancelled():
             return
         try:
-            image = self.generator.requestCaptcha((480, 240, 800, 480))
+            id, image, small = self.generator.create()
             if self._cancelled():
                 return
-            small = self.generator.small_image
+            small = cv2.cvtColor(small, cv2.COLOR_BGRA2BGR)
             regions = self.difficulty_checker.inspect(image, small)
             if not self._cancelled():
                 self.captcha_ready.emit(request_id, image.copy(), small.copy(), regions)
@@ -37,7 +39,7 @@ class TaskWorker(QObject):
         if self._cancelled():
             return
         try:
-            correct = self.generator.isAnswer(region)
+            correct = self.generator.solve(request_id, region)
             if self._cancelled():
                 return
             is_bot = self.bot_detector.is_bot(serial)

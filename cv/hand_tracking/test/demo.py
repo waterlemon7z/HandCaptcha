@@ -115,7 +115,7 @@ def main():
             canvas = tracker.render(result)
 
             # 카메라 미리보기: 문제 이미지 왼쪽 아래 구석 (힌트 패널과 겹치지 않음)
-            preview = cv2.resize(cv2.flip(frame, 1) if tracker.mirror else frame, (PREVIEW_W, PREVIEW_H))
+            preview = cv2.resize(frame, (PREVIEW_W, PREVIEW_H))
             canvas[720 - PREVIEW_H:720, 0:PREVIEW_W] = preview
             cv2.rectangle(canvas, (0, 720 - PREVIEW_H), (PREVIEW_W - 1, 719), (255, 255, 255), 1)
 

@@ -123,24 +123,18 @@ def test_index_tip_is_landmark_8():
     assert index_tip(lm) == pytest.approx((0.24, 0.44))   # 펴진 검지 끝 = (cx-0.06, cy-0.16)
 
 
-def test_cursor_follows_index_tip_with_mirror():
+def test_cursor_follows_index_tip():
     tr = make_tracker()
     r = tr.process_landmarks(make_landmarks(0.25, 0.5), t=0.0)
-    # 검지 끝 카메라 x=0.19 → 좌우 반전 → 화면 x=0.81, y=0.34
-    assert r.position == (round(0.81 * (W - 1)), round(0.34 * (H - 1)))
+    # 검지 끝 좌표 x=0.19, y=0.34를 입력 방향 그대로 화면에 대응한다.
+    assert r.position == (round(0.19 * (W - 1)), round(0.34 * (H - 1)))
     assert r.hand_status == HAND_OPEN
-
-
-def test_landmarks_without_mirror():
-    tr = make_tracker(mirror=False)
-    r = tr.process_landmarks(make_landmarks(0.25, 0.5), t=0.0)
-    assert r.position[0] == round(0.19 * (W - 1))
 
 
 def test_palm_anchor_option():
     tr = make_tracker(anchor="palm")
     r = tr.process_landmarks(make_landmarks(0.25, 0.5), t=0.0)
-    assert r.position == (round(0.75 * (W - 1)), round(0.5 * (H - 1)))
+    assert r.position == (round(0.25 * (W - 1)), round(0.5 * (H - 1)))
 
 
 def test_bad_anchor_and_clip_mode():
@@ -300,7 +294,7 @@ def test_hand_on_hint_panel_too_long_cancels():
 def test_landmarks_outside_camera_frame_are_ignored():
     """카메라 밖으로 걸친 손(정규화 좌표 범위 밖)은 힌트 패널로 매핑되지 않고 무시된다."""
     tr = make_tracker()
-    r = tr.process_landmarks(make_landmarks(-0.05, 0.5, folded=4), t=0.0)  # 반전 후 x = 1.05
+    r = tr.process_landmarks(make_landmarks(-0.05, 0.5, folded=4), t=0.0)  # 이미지 밖의 음수 x
     assert r.position is None
     assert r.state == STATE_IDLE
 
@@ -514,7 +508,7 @@ def test_raw_from_landmarks_is_not_rounded():
     lm = make_landmarks(0.3, 0.5, folded=4)
     r = tr.process_landmarks(lm, 0.0)
     tx, ty = index_tip(lm)
-    expected = ((1 - tx) * (W - 1), ty * (H - 1))
+    expected = (tx * (W - 1), ty * (H - 1))
     assert r.raw_position == pytest.approx(expected)
     assert r.raw_trajectory[0] == pytest.approx(expected)
     assert expected[0] != round(expected[0])                             # 실제로 소수 좌표인 경우
@@ -625,7 +619,7 @@ def test_frames_align_with_trajectory():
     assert all(f.shape == (128, 128, 3) for f in r.frames)
 
 
-def test_crop_is_centered_on_index_tip_and_mirrored():
+def test_crop_is_centered_on_index_tip_and_preserves_orientation():
     tr = make_tracker(crop_size=64)
     frame = make_frame()
     lm = make_landmarks(0.5, 0.5, folded=4)       # 접힌 검지 끝 = (0.44, 0.52)
@@ -634,7 +628,7 @@ def test_crop_is_centered_on_index_tip_and_mirrored():
         r = tr.process_landmarks(lm, r.timestamps[-1] + DT, frame)
     assert r.state == STATE_DONE
     tx, ty = round(0.44 * (CAM_W - 1)), round(0.52 * (CAM_H - 1))
-    expected = frame[ty - 32:ty + 32, tx - 32:tx + 32][:, ::-1]   # 화면과 같은 방향(좌우 반전)
+    expected = frame[ty - 32:ty + 32, tx - 32:tx + 32]
     assert np.array_equal(r.frames[0], expected)
 
 

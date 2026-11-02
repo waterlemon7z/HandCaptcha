@@ -117,7 +117,6 @@ class HandTracker:
         anchor: str = "index_tip",     # 커서 기준점: "index_tip"(검지 끝, 랜드마크 8) | "palm"(손바닥 중심)
         clip_mode: Optional[str] = "crop",  # 기록 중 모을 프레임: "crop"(손끝 주변) | "quarter"(1/4 축소본) | None(안 모음)
         crop_size: int = 128,          # clip_mode="crop"일 때 잘라 낼 크기 (카메라 프레임 픽셀)
-        mirror: bool = True,           # 좌우 반전 (셀카처럼)
         panel_width: int = 320,        # 힌트 패널 폭
         model_path: str | Path = DEFAULT_MODEL,
     ):
@@ -135,7 +134,6 @@ class HandTracker:
         self.anchor = anchor
         self.clip_mode = clip_mode
         self.crop_size = crop_size
-        self.mirror = mirror
         self.panel_width = panel_width
         self.model_path = Path(model_path)
         self._landmarker = None         # 첫 process() 때 만든다 (테스트는 MediaPipe 없이 동작)
@@ -189,8 +187,6 @@ class HandTracker:
         if landmarks is None:
             return self.update(None, HAND_NONE, t)
         nx, ny = index_tip(landmarks) if self.anchor == "index_tip" else palm_center(landmarks)
-        if self.mirror:
-            nx = 1.0 - nx
         # 카메라 프레임 전체를 문제 이미지 영역에만 대응시킨다 (힌트 패널로는 매핑하지 않음)
         point = (nx * (self.width - 1), ny * (self.height - 1))
         clip = None
@@ -240,7 +236,7 @@ class HandTracker:
         raw_position = None if raw is None else self._clip_to_image(raw)   # 원본은 float 그대로
         return self._result(self._to_pixel(point), raw_position, hand_status)
 
-    def render(self, result: HandResult) -> Optional[np.ndarray]:
+    def render(self, result: HandResult, only_captcha=True) -> Optional[np.ndarray]:
         """사용자 화면: 왼쪽 문제 이미지(오버레이 포함) + 오른쪽 힌트 패널(항상 원본 그대로).
 
         궤적(이동 경로)과 경로 전체 box는 기록만 하고 화면에는 그리지 않는다.
@@ -267,7 +263,8 @@ class HandTracker:
         text = f"{result.state.upper()}  hand: {result.hand_status}"
         cv2.rectangle(left, (0, 0), (420, 40), (0, 0, 0), -1)
         cv2.putText(left, text, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2, cv2.LINE_AA)
-
+        if only_captcha:
+            return left
         return np.hstack([left, self._panel])
 
     def close(self) -> None:
@@ -317,7 +314,7 @@ class HandTracker:
         self._last_seen = t
 
     def _make_clip(self, frame: np.ndarray, landmarks) -> np.ndarray:
-        """기록용 프레임: 검지 끝 주변 crop 또는 1/4 축소본. 화면과 같은 방향이 되도록 좌우 반전."""
+        """기록용 프레임: 입력 방향 그대로 검지 끝 주변 crop 또는 1/4 축소본."""
         if self.clip_mode == "quarter":
             h, w = frame.shape[:2]
             clip = cv2.resize(frame, (max(1, w // 4), max(1, h // 4)), interpolation=cv2.INTER_AREA)
@@ -325,7 +322,7 @@ class HandTracker:
             h, w = frame.shape[:2]
             tx, ty = index_tip(landmarks)
             clip = crop_around(frame, (tx * (w - 1), ty * (h - 1)), self.crop_size)
-        return cv2.flip(clip, 1) if self.mirror else clip
+        return clip
 
     def _stopped(self, t: float) -> bool:
         """최근 stop_seconds 동안의 이동 범위(가로·세로 중 큰 값)가 stop_pixels 미만인가."""

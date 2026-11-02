@@ -21,9 +21,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from cv.bot_detection.mock import min_jerk
-from cv.bot_detection.record import dummy_images, save_result
-from hand_tracker import DEFAULT_MODEL, INDEX_TIP, STATE_DONE, HandTracker
+from backend.bot_detection.mock import min_jerk
+from backend.bot_detection.record import dummy_images, save_result
+from cv.hand_tracking.hand_tracker import DEFAULT_MODEL, INDEX_TIP, STATE_DONE, HandTracker
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "test" / "data" / "synth"
 SOURCE_DIR = DATA_DIR / "source"

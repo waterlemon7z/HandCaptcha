@@ -11,17 +11,21 @@ EMPTY = {"correct": False, "answer_box": None, "answer_mask": None}
 
 
 @pytest.mark.parametrize("correct", [True, False])
-def test_worker_uses_generated_problem_id_and_correct_field(asset_dir, correct):
+def test_worker_judges_done_once_and_freezes_until_next_problem(asset_dir, correct, monkeypatch):
+    from types import SimpleNamespace
+
+    from backend.bot_detection import detector
     from backend.worker import TaskWorker
     from cv.hand_tracking.hand_tracker import HandTracker
 
     generator = ProblemGenerator(asset_dir)
     tracker = HandTracker()
     worker = TaskWorker(generator, tracker)
-    images, results, errors = [], [], []
+    images, results, errors, canvases = [], [], [], []
     worker.captcha_ready.connect(lambda *args: images.append(args))
     worker.verification_ready.connect(lambda *args: results.append(args))
     worker.error_occurred.connect(lambda *args: errors.append(args))
+    worker.canvas_ready.connect(lambda *args: canvases.append(args))
 
     worker.generate(7)
     assert not errors
@@ -30,12 +34,31 @@ def test_worker_uses_generated_problem_id_and_correct_field(asset_dir, correct):
     problem_id = worker._problem_id
     assert isinstance(problem_id, str)
     box = generator._answers[problem_id].box if correct else (0, 0, 0, 0)
-    worker.verify(6, box)  # 이전 요청은 현재 문제를 소비하지 않는다.
-    assert results == []
-    worker.verify(7, box)
+    calls = []
+    result = SimpleNamespace(state="done", box=box)
+    monkeypatch.setattr(tracker, "process", lambda frame: calls.append(frame) or result)
+    monkeypatch.setattr(tracker, "render", lambda result: images[-1][1].copy())
+    monkeypatch.setattr(detector, "check", lambda result: (True, "테스트"))
+    worker._latest_frame = np.zeros((72, 128, 3), dtype=np.uint8)
+    worker._process_latest_frame()
     assert results == [(7, correct)]
+    assert len(canvases) == 1
     assert not errors
     assert problem_id not in generator._answers
+    assert worker._problem_id is None
+
+    worker._latest_frame = np.zeros((72, 128, 3), dtype=np.uint8)
+    worker._process_latest_frame()
+    assert len(calls) == len(canvases) == len(results) == 1
+
+    worker.generate(8)
+    assert worker._problem_id is not None
+    assert worker._problem_id != problem_id
+    worker._latest_frame = np.zeros((72, 128, 3), dtype=np.uint8)
+    worker._process_latest_frame()
+    assert len(calls) == len(canvases) == len(results) == 2
+    assert results[-1][0] == 8
+    assert not errors
 
 
 def _answer_of(gen, problem_id):

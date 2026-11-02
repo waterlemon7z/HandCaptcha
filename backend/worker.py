@@ -4,6 +4,7 @@ from threading import Lock
 
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 
+from backend.bot_detection import detector
 from cv.hand_tracking.hand_tracker import HandTracker
 from cv.problem_gen import ProblemGenerator
 
@@ -39,24 +40,19 @@ class TaskWorker(QObject):
 
     @Slot()
     def _process_latest_frame(self):
+        camera_show_rate = 0.
         with self._frame_lock:
+            # 웹캠에서 들어온 frame 중 마지막 프레임만 사용
             frame = self._latest_frame
             self._latest_frame = None
         try:
-            if frame is None or self._cancelled() or not self.tracker.ready:
+            if (frame is None or self._cancelled() or not self.tracker.ready
+                    or self._problem_id is None):
                 return
+            # frame에 대한 손 감지 경로 반환 (중지 여부 같이)
             result = self.tracker.process(frame)
-            if result.state == 'done':
-                x, y = result.stop_position
-                box = (x, y, x+100, y+100)
-                print(box)
-                ret = self.generator.solve(self._problem_id, box)
-                if ret['correct']:
-                    print('pass | now check integrity')
-
-
-
             if result is not None and not self._cancelled():
+                # 만약에 검지가 1초 이상 멈춰서 정답 제출 일 경우
                 canvas = self.tracker.render(result)
                 if canvas is None or self._cancelled():
                     return
@@ -76,18 +72,33 @@ class TaskWorker(QObject):
                 if camera.shape[:2] != (height, width):
                     camera = cv2.resize(camera, (width, height))
                 canvas = cv2.addWeighted(
-                    camera, 0.3,  # 카메라 비중
-                    canvas, 0.7,  # 캡챠 비중
+                    camera, camera_show_rate,  # 카메라 비중
+                    canvas, 1.-camera_show_rate,  # 캡챠 비중
                     0,
                 )
                 self.canvas_ready.emit(self._tracking_request_id, canvas)
                 self.tracking_updated.emit(self._tracking_request_id, result)
+
+                # 완료 프레임을 보낸 뒤 한 번만 판정한다. 다음 generate()까지 화면을 유지한다.
+                # ***** 핵심 로직 *****
+                if result.state == "done" and result.box is not None:
+                    print(result.box)
+                    answer = self.generator.solve(self._problem_id, result.box)
+                    self._problem_id = None
+                    if answer["correct"]:
+                        is_human, comment = detector.check(result)
+                        print(f"{is_human} | {comment}")
+                    if not self._cancelled():
+                        self.verification_ready.emit(
+                            self._tracking_request_id, bool(answer["correct"])
+                        )
         except Exception as exc:
             self.tracker.set_images(None, None)
             self.error_occurred.emit(self._tracking_request_id, f"손인식 처리 오류: {exc}")
         finally:
             with self._frame_lock:
-                again = self._latest_frame is not None and not self._cancelled()
+                again = (self._latest_frame is not None and not self._cancelled()
+                         and self._problem_id is not None)
                 self._frame_pending = again
                 if not again:
                     self._latest_frame = None
@@ -123,18 +134,3 @@ class TaskWorker(QObject):
                 self.captcha_ready.emit(request_id, image.copy(), small.copy())
         except Exception as exc:
             self.error_occurred.emit(request_id, f"문제생성 오류: {exc}")
-
-    @Slot(int, object)
-    def verify(self, request_id, region):
-        if self._cancelled():
-            return
-        if request_id != self._tracking_request_id or self._problem_id is None:
-            return
-        try:
-            result = self.generator.solve(self._problem_id, region)
-            self._problem_id = None
-            if self._cancelled():
-                return
-            self.verification_ready.emit(request_id, bool(result["correct"]))
-        except Exception as exc:
-            self.error_occurred.emit(request_id, f"정답 판정 오류: {exc}")

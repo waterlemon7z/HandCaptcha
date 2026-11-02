@@ -24,7 +24,7 @@ from dataclasses import asdict, dataclass
 import cv2
 import numpy as np
 
-from cv.bot_detection.trajectory import split_dwell
+from backend.bot_detection.trajectory import split_dwell
 
 PROBLEM_W, PROBLEM_H = 1280, 720
 MIN_MOVE, MAX_MOVE = 3, 32      # ②에 쓸 crop 창 이동량 범위 (카메라 px). 너무 작으면 손/배경 구분 불가, 크면 안 겹침
@@ -153,7 +153,7 @@ if __name__ == "__main__":
     import glob
     from pathlib import Path
 
-    from cv.bot_detection.record import load_recording
+    from backend.bot_detection.record import load_recording
 
     data_dir = Path(__file__).resolve().parents[1] / "test" / "data"
     files = sorted(glob.glob(str(data_dir / "human" / "*.npz"))) + \

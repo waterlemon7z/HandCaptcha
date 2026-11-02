@@ -19,7 +19,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from hand_tracker import HAND_FIST, STATE_DONE, HandTracker
+from cv.hand_tracking.hand_tracker import HAND_FIST, STATE_DONE, HandTracker
 
 OUT_DIR = Path(__file__).resolve().parents[1] / "test" / "data" / "human"
 RESET_DELAY = 1.0       # done 후 이만큼 지나면 자동 reset (초)

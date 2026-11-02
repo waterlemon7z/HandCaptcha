@@ -1,7 +1,7 @@
 # 손인식 모듈 (HandTracker)
 
 카메라 프레임에서 손을 찾아 **문제 이미지(1280×720) 좌표**로 바꾸고,
-**주먹을 쥐면 기록 시작 → 손을 움직임 → 1초 멈추면 완료**하여
+**주먹을 쥐었다가 검지를 펴면 기록 시작 → 손을 움직임 → 1초 멈추면 완료**하여
 **움직인 경로**(`trajectory`)와 **마지막에 멈춘 위치**(`stop_position`)를 따로 돌려준다.
 
 | 파일 | 내용 |
@@ -32,7 +32,8 @@ py -3.12 -m venv .venv
 ```
 
 - 손을 펴서 보이면 문제 이미지 위에 커서가 나온다 (회색 = idle).
-- **주먹**을 쥐면 기록이 시작된다 (주황색). 기록 중에는 손을 펴도 된다.
+- **주먹**을 쥐었다가 **검지를 펴면** 기록이 시작된다 (주황색). 편 검지 끝 위치가 첫 점이다.
+  기록 중에는 손 모양과 상관없이 계속 기록한다.
 - 찾을 대상으로 손을 옮겨 **1초 멈추면** 완료된다. 멈춘 위치에 초록 원과 십자 표시가 나온다.
 - 이동 경로는 화면에 그리지 않는다. 완료되면 멈춘 위치, 경로 점 개수, 손끝 프레임 장수를 터미널에 출력한다.
   파일로는 저장하지 않는다. 값은 모두 `result`로 넘어간다.
@@ -64,7 +65,7 @@ py -3.12 -m venv .venv
 | `raw_position` | `(x, y)` float 또는 `None` | 같은 프레임의 **EMA 적용 전 원본** 좌표. **반올림하지 않은 float**. `position`이 `None`이면 `None` |
 | `hand_status` | `"none"` / `"open"` / `"fist"` | 손 모양 |
 | `state` | `"idle"` / `"recording"` / `"done"` | 기록 상태 |
-| `trajectory` | `np.ndarray (N, 2)` int32 | 기록 시작(주먹)부터 지금(또는 완료)까지의 궤적 전체(EMA 보정본), 각 행이 `(x, y)`. 길이 제한 없음 |
+| `trajectory` | `np.ndarray (N, 2)` int32 | 기록 시작(검지 펴기)부터 지금(또는 완료)까지의 궤적 전체(EMA 보정본), 각 행이 `(x, y)`. 길이 제한 없음 |
 | `raw_trajectory` | `np.ndarray (N, 2)` **float64** | `trajectory`와 같은 프레임들의 **원본** 좌표. **반올림하지 않은 float**. `trajectory[i]`와 `raw_trajectory[i]`가 짝 |
 | `timestamps` | `np.ndarray (N,)` | 각 점의 시각(초), 기록 시작 = 0. 진위검출용 |
 | `stop_position` | `(x, y)` 또는 `None` | `state == "done"`일 때만. **마지막에 멈춘 위치** = 멈춤 판정에 쓴 최근 1초 동안 점들의 평균 |
@@ -84,7 +85,7 @@ py -3.12 -m venv .venv
 
 ### 상태 전환
 ```
-idle ──(문제 이미지 안에서 주먹)──▶ recording ──(최근 1초 이동 범위 < 15px)──▶ done
+idle ──(문제 이미지 안에서 주먹 → 검지 펴기)──▶ recording ──(최근 1초 이동 범위 < 15px)──▶ done
   ▲                                     │                                      │
   └──(손이 0.5초 이상 안 보이거나 문제 이미지 밖)┘                             │
   └─────────────────────────────── reset() ◀──────────────────────────────────┘
@@ -126,7 +127,8 @@ tracker.set_images(next_problem_img, next_hint_img)   # 상태도 초기화됨
 tracker.close()                                        # 프로그램 끝날 때
 ```
 
-카메라 없이 로직만 쓰려면 `tracker.update((x, y), "fist", t)`에 문제 이미지 좌표를 직접 넣거나,
+카메라 없이 로직만 쓰려면 `tracker.update((x, y), "fist", t)`에 문제 이미지 좌표를 직접 넣거나
+(기본 시작 방식에서는 `"fist"` 다음 `"open"`이 들어오면 시작. 검지만 따로 알리려면 `index_up=True/False`),
 `tracker.process_landmarks(landmarks, t, frame)`에 랜드마크 21개 `[(x, y), ...]`(정규화 좌표)를 넣으면 된다.
 `frame`을 빼면 프레임 버퍼(`frames`)는 비어 있다.
 
@@ -139,6 +141,7 @@ tracker.close()                                        # 프로그램 끝날 때
 | `lost_seconds` | 0.5 | 기록 중 손이 이 시간 이상 안 보이면 취소 |
 | `alpha` | 0.5 | 좌표 떨림 보정(EMA) 계수. 1.0이면 보정 없음 |
 | `min_folded` | 3 | 주먹 판정: 엄지 제외 접힌 손가락 수 |
+| `start_gesture` | `"point"` | 기록 시작 손동작. `"point"` = 검지까지 접은 주먹을 쥐었다가 검지를 펴는 순간, `"fist"` = 주먹을 쥐는 순간 |
 | `anchor` | `"index_tip"` | 커서 기준점. `"index_tip"` = 검지 끝(랜드마크 8), `"palm"` = 손바닥 중심 |
 | `clip_mode` | `"crop"` | 기록 중 모을 프레임. `"crop"` = 검지 끝 주변, `"quarter"` = 카메라 프레임 1/4 축소본, `None` = 모으지 않음 |
 | `crop_size` | 128 | `"crop"`일 때 잘라 낼 크기 (카메라 프레임 픽셀) |
@@ -149,5 +152,7 @@ tracker.close()                                        # 프로그램 끝날 때
 판정 기준
 - 위치: 검지 끝 = 랜드마크 8 (`anchor="palm"`이면 랜드마크 0, 5, 9, 13, 17의 평균)
 - 주먹: 엄지를 뺀 네 손가락 중 `min_folded`개 이상이 접힘 (손가락 끝이 PIP 관절보다 손목에 가까우면 접힘)
+- 검지 펴짐: 검지 끝(8)이 PIP 관절(6)보다 손목에서 멂.
+  검지만 편 손은 세 손가락이 접혀 있어 `hand_status`가 `"fist"`로 나올 수 있다.
 
 자세한 기준과 이유는 [docs/decisions.md](docs/decisions.md)에 있다.

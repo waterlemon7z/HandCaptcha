@@ -108,6 +108,30 @@ def crop_around(frame: np.ndarray, center: tuple[float, float], size: int) -> np
     return padded[cy:cy + size, cx:cx + size].copy()
 
 
+def get_stop_box(result, stop_seconds=1.0, min_size=100, img_w=1280, img_h=720):
+    """1초 멈춘 구간의 손끝 위치들을 감싸는 박스 (x1, y1, x2, y2). done이 아니면 None."""
+    if result.state != "done":
+        return None
+
+    # 마지막 1초 동안의 손끝 점들 = 멈춘 영역
+    t = result.timestamps
+    pts = result.trajectory[t >= t[-1] - stop_seconds]
+    x1, y1 = pts.min(axis=0)
+    x2, y2 = pts.max(axis=0)
+
+    # 멈춘 영역은 15px도 안 되게 작아서, 가운데를 기준으로 최소 크기까지 넓힌다
+    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+    half_w = max(x2 - x1, min_size) / 2
+    half_h = max(y2 - y1, min_size) / 2
+
+    # 문제 이미지 밖으로 나가지 않게 자른다
+    x1 = int(max(0, cx - half_w))
+    y1 = int(max(0, cy - half_h))
+    x2 = int(min(img_w - 1, cx + half_w))
+    y2 = int(min(img_h - 1, cy + half_h))
+    return x1, y1, x2, y2
+
+
 # ---------------------------------------------------------------- 손인식 클래스
 
 class HandTracker:

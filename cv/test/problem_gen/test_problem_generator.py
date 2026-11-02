@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from cv.problem_gen import ProblemGenerator
-from cv.problem_gen.generator import HIT_IOU, NUM_OBJECTS, OUTPUT_SIZE, _iou
+from cv.problem_gen.generator import HIT_PAD_PX, MIN_ANSWER_SIDE_PX, NUM_OBJECTS, OUTPUT_SIZE, _hit, _iou
 
 from conftest import always_fail, always_solve
 
@@ -88,7 +88,7 @@ def test_image_has_answer_and_distractors(asset_dir):
         answer = _answer_of(gen, problem_id)
         boxes = always_solve(image, None)
         assert len(boxes) == NUM_OBJECTS, seed
-        assert sum(_iou(b, answer.box) >= HIT_IOU for b in boxes) == 1, seed
+        assert sum(_hit(answer.box, b) for b in boxes) == 1, seed
 
 
 def test_same_seed_same_problem_new_id(asset_dir):
@@ -132,18 +132,27 @@ def test_solve_accepts_reversed_and_float_box(asset_dir):
     assert gen.solve(problem_id, (x2 + 0.4, y2 - 0.3, x1 - 0.2, y1 + 0.1))["correct"] is True
 
 
-def test_iou_threshold():
+def test_iou():
     box = (100, 100, 200, 200)
     # 가로로 dx만큼 밀면 IoU = (100 - dx) / (100 + dx)
-    assert _iou(box, _shift(box, 30)) == pytest.approx(70 / 130)   # 0.54 → 정답
-    assert _iou(box, _shift(box, 40)) == pytest.approx(60 / 140)   # 0.43 → 오답
-    assert _iou(box, (0, 0, 1280, 720)) < HIT_IOU                  # 화면 전체를 덮는 박스는 오답
+    assert _iou(box, _shift(box, 40)) == pytest.approx(60 / 140)
     assert _iou(box, (150, 150, 150, 300)) == 0.0                  # 넓이 0
+
+
+def test_hit_tolerance():
+    # 100px 물체: 정답 박스를 사방으로 넓혀 비교하므로 손 박스가 어긋나거나 크게 잡혀도 정답
+    box = (100, 100, 200, 200)
+    assert _hit(box, box)
+    assert _hit(box, _shift(box, 40))                  # 40px 어긋남 (넓히지 않은 IoU는 0.43)
+    assert _hit(box, (70, 70, 230, 230))               # 사방으로 30px 크게 그림
+    assert _hit(box, (120, 120, 180, 180))             # 물체 안쪽에 작게 그림
+    assert not _hit(box, _shift(box, 70))              # 70px 어긋남
+    assert not _hit(box, (0, 0, 1280, 720))            # 화면 전체를 덮는 박스
 
 
 def test_solve_wrong_box_still_reveals(asset_dir):
     gen = ProblemGenerator(asset_dir)
-    for make in [lambda b: _shift(b, (b[2] - b[0]) // 2 + 5), lambda b: (0, 0, W, H), lambda b: (-50, -50, -10, -10)]:
+    for make in [lambda b: _shift(b, b[2] - b[0] + HIT_PAD_PX), lambda b: (0, 0, W, H), lambda b: (-50, -50, -10, -10)]:
         problem_id, _, _ = gen.create(seed=1)
         answer = _answer_of(gen, problem_id)
         result = gen.solve(problem_id, make(answer.box))
@@ -253,3 +262,11 @@ def test_needs_enough_objects(tmp_path):
     (tmp_path / "objects").mkdir()
     with pytest.raises(ValueError):
         ProblemGenerator(tmp_path)
+
+
+def test_answer_box_is_big_enough(asset_dir):
+    # 정답 물체는 보이는 부분 박스의 짧은 변이 MIN_ANSWER_SIDE_PX 이상인 것만 고른다
+    gen = ProblemGenerator(asset_dir)
+    for seed in range(10):
+        x1, y1, x2, y2 = _answer_of(gen, gen.create(seed=seed)[0]).box
+        assert min(x2 - x1, y2 - y1) >= MIN_ANSWER_SIDE_PX, seed

@@ -10,6 +10,34 @@ W, H = OUTPUT_SIZE
 EMPTY = {"correct": False, "answer_box": None, "answer_mask": None}
 
 
+@pytest.mark.parametrize("correct", [True, False])
+def test_worker_uses_generated_problem_id_and_correct_field(asset_dir, correct):
+    from backend.worker import TaskWorker
+    from cv.hand_tracking.hand_tracker import HandTracker
+
+    generator = ProblemGenerator(asset_dir)
+    tracker = HandTracker()
+    worker = TaskWorker(generator, tracker)
+    images, results, errors = [], [], []
+    worker.captcha_ready.connect(lambda *args: images.append(args))
+    worker.verification_ready.connect(lambda *args: results.append(args))
+    worker.error_occurred.connect(lambda *args: errors.append(args))
+
+    worker.generate(7)
+    assert not errors
+    assert tracker.ready
+    assert images[0][0] == 7
+    problem_id = worker._problem_id
+    assert isinstance(problem_id, str)
+    box = generator._answers[problem_id].box if correct else (0, 0, 0, 0)
+    worker.verify(6, box)  # 이전 요청은 현재 문제를 소비하지 않는다.
+    assert results == []
+    worker.verify(7, box)
+    assert results == [(7, correct)]
+    assert not errors
+    assert problem_id not in generator._answers
+
+
 def _answer_of(gen, problem_id):
     """테스트용: 내부에 저장된 정답 (외부 API로는 판정 전에 볼 수 없음)."""
     return gen._answers[problem_id]

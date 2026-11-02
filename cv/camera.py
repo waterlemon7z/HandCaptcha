@@ -1,4 +1,4 @@
-"""카메라 획득과 손인식을 같은 CV 스레드에서 실행한다."""
+"""CV 스레드에서 카메라 프레임을 읽어 전달한다."""
 
 import cv2
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
@@ -6,17 +6,15 @@ from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
 class Camera(QObject):
     frame_ready = Signal(object)
-    hand_updated = Signal(object, object)  # (x, y) 또는 None, 손 시리얼 배열
     error_occurred = Signal(str)
     finished = Signal()
 
     def __init__(self, device_index=0, width=1280, height=720, parent=None,
-                 recognizer=None, capture_factory=None):
+                 capture_factory=None):
         super().__init__(parent)
         self.device_index = device_index
         self.width = width
         self.height = height
-        self.recognizer = recognizer
         self._capture_factory = capture_factory or cv2.VideoCapture
         self._capture = None
         self._timer = None
@@ -52,13 +50,9 @@ class Camera(QObject):
             if not success or frame is None:
                 raise RuntimeError("카메라 프레임을 읽을 수 없습니다.")
             frame = cv2.flip(frame, 1)
-            position, serial = (None, None)
-            if self.recognizer is not None:
-                position, serial = self.recognizer.recognize(frame)
             self.frame_ready.emit(frame.copy())
-            self.hand_updated.emit(position, None if serial is None else serial.copy())
         except Exception as exc:
-            self.error_occurred.emit(f"카메라/손인식 처리 오류: {exc}")
+            self.error_occurred.emit(f"카메라 처리 오류: {exc}")
             self.stop()
 
     @Slot()

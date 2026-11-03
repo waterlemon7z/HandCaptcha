@@ -81,9 +81,9 @@ class TaskWorker(QObject):
 
                 # 완료 프레임을 보낸 뒤 한 번만 판정한다. 다음 generate()까지 화면을 유지한다.
                 # ***** 핵심 로직 *****
-                if result.state == "done" and result.box is not None:
+                if result.state == "done":
                     box = get_stop_box(result)
-                    answer = self.generator.solve(self._problem_id, result.box)
+                    answer = self.generator.solve(self._problem_id, box)
                     self._problem_id = None
                     if answer["correct"]:
                         is_human, comment = detector.check(result)

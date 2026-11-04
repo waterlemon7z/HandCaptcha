@@ -8,6 +8,9 @@ from cv.hand_tracking.hand_tracker import HandTracker
 from cv.problem_gen import ProblemGenerator
 from gui.controller import Controller
 from gui.signal import HandCaptchaUI
+from verification.difficulty_check import difficulty_check
+
+generator = ProblemGenerator(validator=difficulty_check)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

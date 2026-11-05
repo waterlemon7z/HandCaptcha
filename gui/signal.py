@@ -1,13 +1,14 @@
+"""
+Author  : MinSeok Choi
+File    : signal.py
+Role    : GUI의 버튼 클릭과 같은 이슈를 Signal로 함수 연동
+"""
 import sys
-
 import numpy as np
-
 from PySide6.QtWidgets import QMainWindow, QGraphicsScene, QApplication
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QImage, QPixmap, QPen, QColor
-
 from gui.handcaptcha import Ui_MainWindow
-
 
 class HandCaptchaUI(QMainWindow):
     refresh_requested = Signal()

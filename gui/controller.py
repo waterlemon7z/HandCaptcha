@@ -1,7 +1,11 @@
+"""
+Author  : MinSeok Choi
+File    : controller.py
+Role    : GUI의 버튼 연동 및 상태 변화에 따른 업데이트
+"""
 import cv2
 import numpy as np
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
-
 
 class Controller(QObject):
     generate_requested = Signal(int, str)

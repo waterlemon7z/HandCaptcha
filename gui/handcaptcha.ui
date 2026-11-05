@@ -47,10 +47,13 @@
        </widget>
       </item>
       <item>
-       <widget class="QPushButton" name="pushButton">
-        <property name="text">
-         <string>디버깅</string>
+       <widget class="QComboBox" name="verificationCombo">
+        <property name="toolTip">
+         <string>캡챠 자동 풀이 검증 방식. 다음 문제 생성부터 적용됩니다.</string>
         </property>
+        <item><property name="text"><string>ORB/SIFT</string></property></item>
+        <item><property name="text"><string>ORB</string></property></item>
+        <item><property name="text"><string>SIFT</string></property></item>
        </widget>
       </item>
       <item>

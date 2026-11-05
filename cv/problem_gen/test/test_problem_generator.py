@@ -10,6 +10,22 @@ W, H = OUTPUT_SIZE
 EMPTY = {"correct": False, "answer_box": None, "answer_mask": None}
 
 
+@pytest.mark.parametrize("method", ["auto", "orb", "sift"])
+def test_selected_verification_method_reaches_checker(asset_dir, method):
+    class Checker:
+        def __init__(self):
+            self.methods = []
+
+        def difficult_check(self, image, target, *, method):
+            self.methods.append(method)
+            return []
+
+    checker = Checker()
+    generator = ProblemGenerator(asset_dir, validator=checker)
+    generator.create(seed=1, verification_method=method)
+    assert checker.methods == [method]
+
+
 @pytest.mark.parametrize("correct", [True, False])
 def test_worker_judges_done_once_and_freezes_until_next_problem(asset_dir, correct, monkeypatch):
     from types import SimpleNamespace

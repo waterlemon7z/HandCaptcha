@@ -12,7 +12,6 @@ from gui.handcaptcha import Ui_MainWindow
 class HandCaptchaUI(QMainWindow):
     refresh_requested = Signal()
     confirm_requested = Signal()
-    debug_requested = Signal()
 
     def __init__(self):
         super().__init__()
@@ -37,7 +36,9 @@ class HandCaptchaUI(QMainWindow):
     def connect_events(self):
         self.ui.refreshButton.clicked.connect(self.refresh_requested.emit)
         self.ui.confirm.clicked.connect(self.confirm_requested.emit)
-        self.ui.debugButton.clicked.connect(self.debug_requested.emit)
+
+    def verification_method(self):
+        return self.ui.verificationCombo.currentData()
 
     @Slot(object)
     def set_captcha(self, image: np.ndarray):

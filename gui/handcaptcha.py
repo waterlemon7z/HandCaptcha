@@ -15,7 +15,7 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QFrame, QGraphicsView, QHBoxLayout,
+from PySide6.QtWidgets import (QApplication, QComboBox, QFrame, QGraphicsView, QHBoxLayout,
     QLabel, QMainWindow, QPushButton, QSizePolicy,
     QSpacerItem, QVBoxLayout, QWidget)
 
@@ -66,16 +66,15 @@ class Ui_MainWindow(object):
 "    font-size: 23px;\n"
 "    padding: 2px 6px;\n"
 "}\n"
-"QPushButton"
-                        "#debugButton {\n"
+"QComboBox#verificationCombo {\n"
 "    color: #667587;\n"
 "    background-color: transparent;\n"
-"    border: 1px solid transparent;\n"
+"    border: 1px solid #D5DCE4;\n"
 "    border-radius: 5px;\n"
 "    font-size: 13px;\n"
 "    padding: 6px;\n"
 "}\n"
-"QPushButton#refreshButton:hover, QPushButton#infoButton:hover, QPushButton#debugButton:hover {\n"
+"QPushButton#refreshButton:hover, QPushButton#infoButton:hover {\n"
 "    background-color: #EDF2F8;\n"
 "    border-color: #E2E8F0;\n"
 "}\n"
@@ -197,11 +196,15 @@ class Ui_MainWindow(object):
 
         self.footerLayout.addWidget(self.infoButton)
 
-        self.debugButton = QPushButton(self.footerWidget)
-        self.debugButton.setObjectName(u"debugButton")
-        self.debugButton.setMinimumSize(QSize(60, 44))
+        self.verificationCombo = QComboBox(self.footerWidget)
+        self.verificationCombo.setObjectName(u"verificationCombo")
+        self.verificationCombo.setMinimumSize(QSize(120, 36))
+        self.verificationCombo.addItem("ORB/SIFT", "auto")
+        self.verificationCombo.addItem("ORB", "orb")
+        self.verificationCombo.addItem("SIFT", "sift")
+        self.verificationCombo.setAccessibleName("검증 방식")
 
-        self.footerLayout.addWidget(self.debugButton)
+        self.footerLayout.addWidget(self.verificationCombo)
 
         self.footerSpacer = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
@@ -252,7 +255,7 @@ class Ui_MainWindow(object):
         self.infoButton.setToolTip(QCoreApplication.translate("MainWindow", u"\uc0ac\uc6a9 \ubc29\ubc95", None))
 #endif // QT_CONFIG(tooltip)
         self.infoButton.setText(QCoreApplication.translate("MainWindow", u"\u24d8", None))
-        self.debugButton.setText(QCoreApplication.translate("MainWindow", u"\ub514\ubc84\uae45", None))
+        self.verificationCombo.setToolTip("캡챠 자동 풀이 검증 방식. 다음 문제 생성부터 적용됩니다.")
         self.statueLabel.setText(QCoreApplication.translate("MainWindow", u"Status:", None))
         self.statusValue.setText(QCoreApplication.translate("MainWindow", u"READY", None))
         self.confirm.setText(QCoreApplication.translate("MainWindow", u"\ud655\uc778", None))

@@ -4,7 +4,7 @@ from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 
 
 class Controller(QObject):
-    generate_requested = Signal(int)
+    generate_requested = Signal(int, str)
 
     def __init__(self, view, camera, task_worker):
         super().__init__()
@@ -39,7 +39,7 @@ class Controller(QObject):
         camera.finished.connect(self.cv_thread.quit, Qt.ConnectionType.DirectConnection)
 
         # Controller → TaskWorker: 문제 생성 요청
-        self.generate_requested.connect(task_worker.generate, Qt.ConnectionType.QueuedConnection)
+        self.generate_requested.connect(task_worker.generate_with_method, Qt.ConnectionType.QueuedConnection)
 
         # Camera → GUI / TaskWorker: 화면 표시 및 최신 프레임 전달
         camera.frame_ready.connect(self.on_frame, Qt.ConnectionType.QueuedConnection)
@@ -59,7 +59,6 @@ class Controller(QObject):
         # GUI → Controller: 버튼 이벤트
         view.refresh_requested.connect(self.refresh)
         view.confirm_requested.connect(self.confirm)
-        view.debug_requested.connect(self.debug)
 
     def _set_state(self, state):
         self.state = state
@@ -130,7 +129,7 @@ class Controller(QObject):
         self.position = None
         self.view.set_hand_position(None, None)
         self._set_state("GENERATING")
-        self.generate_requested.emit(self._request_id)
+        self.generate_requested.emit(self._request_id, self.view.verification_method())
 
     @Slot(int, object, object)
     def on_captcha(self, request_id, image, small):
@@ -163,10 +162,6 @@ class Controller(QObject):
         if not self._closing and request_id == self._request_id:
             print(message)
             self._set_state("ERROR")
-
-    @Slot()
-    def debug(self):
-        print(f"Controller: state={self.state}, hand={self.position}")
 
     @Slot()
     def shutdown(self):

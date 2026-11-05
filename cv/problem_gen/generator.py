@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from cv.verification.difficulty_check import DifficultyCheck
 from .assets import list_assets, read_image, read_object
 from .blending import pyramid_blend
 from .compose import fit_background, floor_map, place_object, transform_object
@@ -83,18 +84,21 @@ class ProblemGenerator:
         self._backgrounds, self._objects = list_assets(asset_dir)
         if len(self._objects) < NUM_OBJECTS:
             raise ValueError(f"물체 이미지가 {NUM_OBJECTS}개 이상 필요합니다: {len(self._objects)}개")
-        self._validator = validator
+        self._validator:DifficultyCheck|None = validator
         self._max_attempts = max_attempts
         self._answers = {}
         self._history = []
 
-    def create(self, seed=None):
+    def create(self, seed=None, *, verification_method="auto"):
         """새 문제를 만든다. 반환: (problem_id, image, target).
 
         image: 물체 NUM_OBJECTS개를 숨긴 합성 이미지 (H×W×3 BGR)
         target: 찾아야 할 정답 물체의 원본 이미지 (BGRA). 사용자 화면에 "이것을 찾으세요"로 보여 주고, 검수 입력으로도 쓴다
+        verification_method: 자동 풀이 검증 방식(auto=ORB/SIFT, orb, sift).
         정답은 반환하지 않는다.
         """
+        if verification_method not in ("auto", "orb", "sift"):
+            raise ValueError("verification_method는 auto, orb, sift 중 하나여야 합니다.")
         if seed is None:
             seed = secrets.randbits(32)
         # 재생성도 같은 rng를 이어 쓰므로 seed와 validator가 같으면 최종 문제도 같다
@@ -104,7 +108,14 @@ class ProblemGenerator:
             image, target, answer = self._build(rng)
             if self._validator is None:
                 break
-            boxes = [tuple(int(round(float(v))) for v in b) for b in self._validator(image, target) or []]
+            if hasattr(self._validator, "difficult_check"):
+                candidates = self._validator.difficult_check(
+                    image, target, method=verification_method
+                )
+            else:
+                # 기존 callable 검수기도 계속 지원한다.
+                candidates = self._validator(image, target)
+            boxes = [tuple(int(round(float(v))) for v in b) for b in candidates or []]
             solved = any(_hit(answer.box, b) for b in boxes)
             attempts.append({"boxes": boxes, "solved": solved})
             if not solved:

@@ -1,13 +1,14 @@
-"""문제 생성, 손 추적, 정답 판정을 직렬 실행하는 Task Worker."""
+"""
+Author  : MinSeok Choi
+File    : worker.py
+Role    : GUI와 관련이 적은 기능들을 실행할 스레드
+"""
 import cv2
 from threading import Lock
-
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
-
 from backend.bot_detection import detector
 from cv.hand_tracking.hand_tracker import HandTracker, get_stop_box
 from cv.problem_gen import ProblemGenerator
-
 
 class TaskWorker(QObject):
     captcha_ready = Signal(int, object, object)
@@ -116,13 +117,19 @@ class TaskWorker(QObject):
 
     @Slot(int)
     def generate(self, request_id):
+        self.generate_with_method(request_id, "auto")
+
+    @Slot(int, str)
+    def generate_with_method(self, request_id, verification_method):
         if self._cancelled():
             return
         try:
             self._tracking_request_id = request_id
             self.tracker.set_images(None, None)
             self._problem_id = None
-            problem_id, image, small = self.generator.create()
+            problem_id, image, small = self.generator.create(
+                verification_method=verification_method
+            )
             if self._cancelled():
                 return
             small = cv2.cvtColor(small, cv2.COLOR_BGRA2BGR)

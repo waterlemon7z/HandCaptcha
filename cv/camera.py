@@ -1,8 +1,10 @@
-"""CV 스레드에서 카메라 프레임을 읽어 전달한다."""
-
+"""
+Author  : MinSeok Choi
+File    : camera.py
+Role    : Camera로부터 실시간 프레임을 제공
+"""
 import cv2
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
-
 
 class Camera(QObject):
     frame_ready = Signal(object)

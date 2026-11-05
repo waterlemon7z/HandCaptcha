@@ -1,7 +1,7 @@
 """배경·물체·배치를 고정한 인공 가림 비교 실험.
 
 실행:
-    py test_occlusion.py
+    python -m cv.verification.test.occlusion_test
 
 기존 생성기 파일과 검수기 파일을 수정하지 않는다.
 가림 면적은 변형된 대상의 alpha > 0.5 픽셀 수를 기준으로 한다.
@@ -21,10 +21,11 @@ from cv.problem_gen.compose import (
 )
 from cv.problem_gen.generator import blend_object
 
-from verification.difficulty_check import difficulty_check
+from cv.verification.difficulty_check import DifficultyCheck
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[3]
+METHODS = ("orb", "sift")
 ASSET_DIR = ROOT / "assets"
 OUTPUT_DIR = ROOT / "occlusion_results"
 
@@ -208,8 +209,12 @@ def main():
             "assets/backgrounds와 assets/objects에 이미지가 필요합니다."
         )
 
+    checker = DifficultyCheck()
     rows = []
-    results = {ratio: [] for ratio in OCCLUSION_RATIOS}
+    results = {
+        method: {ratio: [] for ratio in OCCLUSION_RATIOS}
+        for method in (*METHODS, "auto")
+    }
 
     for index in range(NUM_SAMPLES):
         seed = START_SEED + index
@@ -249,86 +254,88 @@ def main():
             )
 
             # 정답 정보는 검수기에 전달하지 않는다.
-            boxes = difficulty_check(image, target)
-
-            best_iou = max(
-                (box_iou(answer_box, box) for box in boxes),
-                default=0.0,
-            )
-
-            correct = best_iou >= IOU_THRESHOLD
-
-            if correct:
-                status = "correct"
-            elif boxes:
-                status = "wrong_location"
-            else:
-                status = "not_detected"
-
-            results[ratio].append(correct)
-
-            rows.append({
-                "seed": seed,
-                "background": background_path.name,
-                "object": object_path.name,
-                "side": side,
-                "requested_occlusion": ratio,
-                "actual_occlusion": actual_ratio,
-                "boxes": str(boxes),
-                "answer_box": str(answer_box),
-                "iou": best_iou,
-                "status": status,
-            })
-
+            boxes_by_method = {
+                method: checker.difficult_check(image, target, method=method)
+                for method in METHODS
+            }
+            boxes_by_method["auto"] = list(dict.fromkeys(
+                box for method in METHODS for box in boxes_by_method[method]
+            ))
             percent = round(ratio * 100)
+            save_image(sample_dir / f"input_{percent:02d}.png", image)
 
-            # 원본 문제 이미지와 평가용 이미지를 각각 저장
-            save_image(
-                sample_dir / f"input_{percent:02d}.png",
-                image,
-            )
+            for method, boxes in boxes_by_method.items():
+                best_iou = max(
+                    (box_iou(answer_box, box) for box in boxes),
+                    default=0.0,
+                )
 
-            preview = image.copy()
+                correct = best_iou >= IOU_THRESHOLD
 
-            # 빨간색: 가림 전 대상 전체의 정답 박스
-            x1, y1, x2, y2 = answer_box
-            cv2.rectangle(
-                preview,
-                (x1, y1), (x2 - 1, y2 - 1),
-                (0, 0, 255), 2,
-            )
+                if correct:
+                    status = "correct"
+                elif boxes:
+                    status = "wrong_location"
+                else:
+                    status = "not_detected"
 
-            # 초록색: 검수기가 추정한 박스
-            for x1, y1, x2, y2 in boxes:
+                results[method][ratio].append(correct)
+
+                rows.append({
+                    "seed": seed,
+                    "method": method,
+                    "background": background_path.name,
+                    "object": object_path.name,
+                    "side": side,
+                    "requested_occlusion": ratio,
+                    "actual_occlusion": actual_ratio,
+                    "boxes": str(boxes),
+                    "answer_box": str(answer_box),
+                    "iou": best_iou,
+                    "status": status,
+                })
+
+                preview = image.copy()
+
+                # 빨간색: 가림 전 대상 전체의 정답 박스
+                x1, y1, x2, y2 = answer_box
                 cv2.rectangle(
                     preview,
                     (x1, y1), (x2 - 1, y2 - 1),
-                    (0, 255, 0), 2,
+                    (0, 0, 255), 2,
                 )
 
-            cv2.putText(
-                preview,
-                (
-                    f"seed={seed} hidden={actual_ratio:.1%} "
-                    f"{status} IoU={best_iou:.3f}"
-                ),
-                (20, 35),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.65,
-                (255, 255, 255),
-                2,
-            )
+                # 초록색: 검수기가 추정한 박스
+                for x1, y1, x2, y2 in boxes:
+                    cv2.rectangle(
+                        preview,
+                        (x1, y1), (x2 - 1, y2 - 1),
+                        (0, 255, 0), 2,
+                    )
 
-            save_image(
-                sample_dir / f"result_{percent:02d}.png",
-                preview,
-            )
+                cv2.putText(
+                    preview,
+                    (
+                        f"{method.upper()} seed={seed} hidden={actual_ratio:.1%} "
+                        f"{status} IoU={best_iou:.3f}"
+                    ),
+                    (20, 35),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.65,
+                    (255, 255, 255),
+                    2,
+                )
 
-            print(
-                f"[{index + 1}/{NUM_SAMPLES}] "
-                f"seed={seed}, 가림={actual_ratio:.1%}, "
-                f"상태={status}, IoU={best_iou:.3f}"
-            )
+                save_image(
+                    sample_dir / f"result_{percent:02d}_{method}.png",
+                    preview,
+                )
+
+                print(
+                    f"[{index + 1}/{NUM_SAMPLES}] "
+                    f"{method.upper()}, seed={seed}, 가림={actual_ratio:.1%}, "
+                    f"상태={status}, IoU={best_iou:.3f}"
+                )
 
         # 한 표본의 모든 조건을 처리한 뒤 창 표시
         if SHOW_WINDOW:
@@ -355,31 +362,34 @@ def main():
 
     print("\n===== 조건별 결과 =====")
 
-    baseline = results[0.0]
+    for method, method_results in results.items():
+        label = "ORB 또는 SIFT" if method == "auto" else method.upper()
+        print(f"\n[{label}]")
+        baseline = method_results[0.0]
 
-    for ratio, flags in results.items():
-        total = len(flags)
-        success = sum(flags)
+        for ratio, flags in method_results.items():
+            total = len(flags)
+            success = sum(flags)
 
-        # 가림 없을 때 맞힌 표본 중 이 조건에서도 맞힌 개수
-        baseline_success = sum(baseline)
-        retained = sum(
-            before and after
-            for before, after in zip(baseline, flags)
-        )
-
-        print(
-            f"가림 {ratio:.0%}: "
-            f"정답 {success}/{total} "
-            f"({success / total:.1%})"
-        )
-
-        if ratio > 0 and baseline_success:
-            print(
-                f"  가림 전 정답 표본의 검출 유지율: "
-                f"{retained}/{baseline_success} "
-                f"({retained / baseline_success:.1%})"
+            # 가림 없을 때 맞힌 표본 중 이 조건에서도 맞힌 개수
+            baseline_success = sum(baseline)
+            retained = sum(
+                before and after
+                for before, after in zip(baseline, flags)
             )
+
+            print(
+                f"가림 {ratio:.0%}: "
+                f"정답 {success}/{total} "
+                f"({success / total:.1%})"
+            )
+
+            if ratio > 0 and baseline_success:
+                print(
+                    f"  가림 전 정답 표본의 검출 유지율: "
+                    f"{retained}/{baseline_success} "
+                    f"({retained / baseline_success:.1%})"
+                )
 
     print(f"\n결과 저장 위치: {OUTPUT_DIR}")
 

@@ -230,7 +230,9 @@ cv/hand_tracking/CLAUDE.md
 # 실험 결과 이미지 및 데이터 제외
 test_results/
 occlusion_results/
+verification_results/
 
 # Python 실행 시 자동 생성되는 캐시 파일 제외
 __pycache__/
 *.pyc
+/owlv2_results/

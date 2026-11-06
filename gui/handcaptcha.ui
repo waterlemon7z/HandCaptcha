@@ -54,6 +54,7 @@
         <item><property name="text"><string>ORB/SIFT</string></property></item>
         <item><property name="text"><string>ORB</string></property></item>
         <item><property name="text"><string>SIFT</string></property></item>
+        <item><property name="text"><string>OWLv2</string></property></item>
        </widget>
       </item>
       <item>

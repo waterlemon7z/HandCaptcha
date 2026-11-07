@@ -28,6 +28,7 @@ OUT_DIR = Path(__file__).resolve().parent / "test" / "data" / "human"
 CAM_W, CAM_H = 1280, 720    # 앱 Camera와 같은 요청 해상도
 RESET_DELAY = 1.0       # done 후 이만큼 지나면 자동 reset (초)
 MIN_SPAN = 30.0         # 원본 궤적의 이동 범위(가로·세로 중 큰 값)가 이 픽셀 미만이면 저장 안 함
+MAX_READ_FAILS = 60     # 카메라 프레임을 이만큼 연속 못 읽으면 종료 (가끔 놓치는 건 무시)
 
 
 def dummy_images(width: int = 1280, height: int = 720) -> tuple[np.ndarray, np.ndarray]:
@@ -45,7 +46,16 @@ def save_result(result, out_dir: Path = OUT_DIR, name: str | None = None) -> Pat
     """done 상태의 HandResult를 .npz로 저장한다. name이 없으면 human_날짜_시각."""
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{name or f'human_{datetime.now():%Y%m%d_%H%M%S}'}.npz"
-    frames = np.stack(result.frames) if result.frames else np.empty((0, 0, 0, 3), np.uint8)
+    if result.frames:
+        # 손끝이 화면 밖 멀리 가면 손인식 crop 크기가 깨짐 → 그 프레임은 검정으로 (영상 검사에서 제외됨)
+        shapes = [f.shape for f in result.frames]
+        common = max(set(shapes), key=shapes.count)
+        bad = sum(s != common for s in shapes)
+        if bad:
+            print(f"  (crop 크기가 깨진 프레임 {bad}장은 검정으로 저장)")
+        frames = np.stack([f if f.shape == common else np.zeros(common, np.uint8) for f in result.frames])
+    else:
+        frames = np.empty((0, 0, 0, 3), np.uint8)
     np.savez_compressed(
         path,
         trajectory=result.trajectory,
@@ -77,12 +87,18 @@ def main(camera: int = 0) -> None:
                                                else f"  (요청 {CAM_W}×{CAM_H}을 지원 안 함, 앱도 같은 해상도로 돌아감)"))
     tracker = HandTracker(*dummy_images())
     cv2.namedWindow("record", cv2.WINDOW_NORMAL)
-    saved, done_at = 0, None
+    saved, done_at, fails = 0, None, 0
     try:
         while True:
             ok, frame = cap.read()
-            if not ok:
-                break
+            if not ok or frame is None:
+                fails += 1                  # 웹캠이 가끔 프레임을 놓침 → 바로 끄지 않고 다시 읽음
+                if fails >= MAX_READ_FAILS:
+                    print(f"카메라 프레임을 {MAX_READ_FAILS}번 연속 못 읽어서 종료 (다른 프로그램이 카메라를 쓰는지 확인)")
+                    break
+                time.sleep(0.01)
+                continue
+            fails = 0
             frame = cv2.flip(frame, 1)      # 앱 Camera와 같이 좌우 반전 (거울처럼)
             result = tracker.process(frame)
             if result is None:

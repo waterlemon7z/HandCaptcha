@@ -225,6 +225,8 @@ __marimo__/
 backend/bot_detection/test/data/human/
 # 진위검출: 합성 봇 재료 사진·생성 결과 (웹캠 이미지 포함)
 backend/bot_detection/test/data/synth/
+# 진위검출: 개인용 예상 Q&A
+backend/bot_detection/qna.md
 # 진위검출 CNN: 캐글 결과(데이터·가중치)
 backend/bot_detection/cnn/*.npz
 backend/bot_detection/cnn/*.pt

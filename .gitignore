@@ -222,10 +222,15 @@ __marimo__/
 .idea/
 
 # 진위검출: 사람 손 녹화 (웹캠 crop 포함, 로컬에만 보관)
-cv/test/data/human/
+backend/bot_detection/test/data/human/
 # 진위검출: 합성 봇 재료 사진·생성 결과 (웹캠 이미지 포함)
-cv/test/data/synth/
+backend/bot_detection/test/data/synth/
+# 진위검출 CNN: 캐글 결과(데이터·가중치)
+backend/bot_detection/cnn/*.npz
+backend/bot_detection/cnn/*.pt
 cv/hand_tracking/CLAUDE.md
+# MediaPipe 손 모델 (download_model.py로 각자 받음)
+cv/hand_tracking/models/
 
 # 실험 결과 이미지 및 데이터 제외
 test_results/

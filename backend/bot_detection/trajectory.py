@@ -138,7 +138,7 @@ def extract(points: np.ndarray, times: np.ndarray) -> TrajectoryFeatures:
 if __name__ == "__main__":
     # 봇 목데이터 vs 사람 녹화의 특징 분포 비교
 
-    data_dir = Path(__file__).resolve().parents[1] / "test" / "data"
+    data_dir = Path(__file__).resolve().parent / "test" / "data"
     groups: dict[str, list[TrajectoryFeatures]] = {}
     for f in sorted(glob.glob(str(data_dir / "bot" / "*.csv"))):
         m = load_csv(f)

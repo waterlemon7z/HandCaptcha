@@ -155,7 +155,7 @@ if __name__ == "__main__":
 
     from backend.bot_detection.record import load_recording
 
-    data_dir = Path(__file__).resolve().parents[1] / "test" / "data"
+    data_dir = Path(__file__).resolve().parent / "test" / "data"
     files = sorted(glob.glob(str(data_dir / "human" / "*.npz"))) + \
         sorted(glob.glob(str(data_dir / "synth" / "S*" / "*.npz")))
     groups: dict[str, list[FrameFeatures]] = {}

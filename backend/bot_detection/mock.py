@@ -178,7 +178,7 @@ def load_csv(path: str | Path) -> MockTrajectory:
 
 
 if __name__ == "__main__":
-    out_dir = Path(__file__).resolve().parents[1] / "test" / "data" / "bot"
+    out_dir = Path(__file__).resolve().parent / "test" / "data" / "bot"
     out_dir.mkdir(parents=True, exist_ok=True)
     counts: dict[str, int] = {}
     for m in make_bots():

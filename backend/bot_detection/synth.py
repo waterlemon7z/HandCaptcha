@@ -25,7 +25,7 @@ from backend.bot_detection.mock import min_jerk
 from backend.bot_detection.record import dummy_images, save_result
 from cv.hand_tracking.hand_tracker import DEFAULT_MODEL, INDEX_TIP, STATE_DONE, HandTracker
 
-DATA_DIR = Path(__file__).resolve().parents[1] / "test" / "data" / "synth"
+DATA_DIR = Path(__file__).resolve().parent / "test" / "data" / "synth"
 SOURCE_DIR = DATA_DIR / "source"
 CAM_W, CAM_H = 640, 480          # 사람 녹화와 같은 카메라 크기
 FPS = 30.0

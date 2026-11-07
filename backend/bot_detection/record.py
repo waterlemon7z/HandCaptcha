@@ -1,12 +1,15 @@
 """사람 손 궤적 녹화 (진위검출 기준 데이터 수집용).
 
 손인식(HandTracker)을 웹캠으로 돌리다가 done이 되면 HandResult를 .npz로 저장한다.
-저장 후 잠깐 뒤 자동으로 reset되고, 손을 한 번 펴면 다음 녹화를 받는다.
-(주먹을 쥔 채로 reset되면 바로 기록이 시작돼 1초 뒤 "멈춤"으로 끝나 버리므로)
+카메라 조건은 앱(cv/camera.py)과 같게: 1280×720 요청, 좌우 반전 후 HandTracker에 넣음.
+동작: 주먹 → 검지 펴기(기록 시작) → 이동 → 1초 멈춤(done, 저장). 저장 후 잠깐 뒤 자동 reset되고,
+다음 녹화는 다시 주먹부터 (HandTracker 기본 start_gesture="point").
 거의 움직이지 않은 기록은 저장하지 않는다.
 
-실행 (레포 루트에서, hand_tracker.py와 models/hand_landmarker.task 필요)
-    python -m cv.bot_detection.record
+실행 (레포 루트에서)
+    python cv/hand_tracking/download_model.py      # 처음 한 번 (모델 파일)
+    python -m backend.bot_detection.record
+저장 위치: backend/bot_detection/test/data/human/ (gitignore, 웹캠 영상 포함)
 
 키: q = 종료, r = 지금 기록 버리고 다시
 """
@@ -19,9 +22,10 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from cv.hand_tracking.hand_tracker import HAND_FIST, STATE_DONE, HandTracker
+from cv.hand_tracking.hand_tracker import DEFAULT_MODEL, STATE_DONE, HandTracker
 
-OUT_DIR = Path(__file__).resolve().parents[1] / "test" / "data" / "human"
+OUT_DIR = Path(__file__).resolve().parent / "test" / "data" / "human"
+CAM_W, CAM_H = 1280, 720    # 앱 Camera와 같은 요청 해상도
 RESET_DELAY = 1.0       # done 후 이만큼 지나면 자동 reset (초)
 MIN_SPAN = 30.0         # 원본 궤적의 이동 범위(가로·세로 중 큰 값)가 이 픽셀 미만이면 저장 안 함
 
@@ -61,27 +65,30 @@ def load_recording(path: str | Path) -> dict[str, np.ndarray]:
 
 
 def main(camera: int = 0) -> None:
+    if not Path(DEFAULT_MODEL).exists():
+        raise SystemExit(f"모델 파일이 없음: {DEFAULT_MODEL}\n먼저 실행: python cv/hand_tracking/download_model.py")
     cap = cv2.VideoCapture(camera)
     if not cap.isOpened():
         raise RuntimeError(f"카메라 {camera}번을 열 수 없습니다")
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_W)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_H)
+    real_w, real_h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    print(f"카메라 해상도: {real_w}×{real_h}" + ("" if (real_w, real_h) == (CAM_W, CAM_H)
+                                               else f"  (요청 {CAM_W}×{CAM_H}을 지원 안 함, 앱도 같은 해상도로 돌아감)"))
     tracker = HandTracker(*dummy_images())
     cv2.namedWindow("record", cv2.WINDOW_NORMAL)
     saved, done_at = 0, None
-    armed = True            # False면 손을 펼 때까지 기록을 받지 않음
     try:
         while True:
             ok, frame = cap.read()
             if not ok:
                 break
+            frame = cv2.flip(frame, 1)      # 앱 Camera와 같이 좌우 반전 (거울처럼)
             result = tracker.process(frame)
+            if result is None:
+                continue
 
-            if not armed:
-                if result.hand_status == HAND_FIST:
-                    tracker.reset()     # 주먹 쥔 채로 시작된 기록은 버린다
-                else:
-                    armed = True
-
-            if armed and result.state == STATE_DONE and done_at is None:
+            if result.state == STATE_DONE and done_at is None:
                 done_at = time.monotonic()
                 span = float(np.ptp(result.raw_trajectory, axis=0).max())
                 if span < MIN_SPAN:
@@ -92,12 +99,11 @@ def main(camera: int = 0) -> None:
                     print(f"[{saved}] {path.name}  점 {len(result.timestamps)}개, "
                           f"{result.timestamps[-1]:.2f}초, 이동 범위 {span:.0f}px")
             if done_at is not None and time.monotonic() - done_at >= RESET_DELAY:
-                tracker.reset()
+                tracker.reset()             # 다음 기록은 다시 주먹 → 검지 펴기부터
                 done_at = None
-                armed = False
 
             view = tracker.render(result)
-            status = f"saved: {saved}" + ("" if armed else "   open your hand")
+            status = f"saved: {saved}   fist -> point to start"
             cv2.putText(view, status, (10, view.shape[0] - 15),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
             cv2.imshow("record", view)

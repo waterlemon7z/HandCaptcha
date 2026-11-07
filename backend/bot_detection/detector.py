@@ -72,7 +72,7 @@ def check_arrays(raw_trajectory, timestamps, frames, frame_size) -> tuple[bool, 
 
 if __name__ == "__main__":
 
-    data_dir = Path(__file__).resolve().parents[1] / "test" / "data"
+    data_dir = Path(__file__).resolve().parent / "test" / "data"
     results: dict[str, list[tuple[str, bool, str]]] = {}
     for f in sorted(glob.glob(str(data_dir / "bot" / "*.csv"))):
         m = load_csv(f)

@@ -1,7 +1,8 @@
 """영상 검사 (진위검출 2단계): 이 crop들이 진짜 카메라로 찍은 진짜 손인가.
 
-입력은 손인식 HandResult의 frames(검지 끝 중심 crop, 좌우 반전), raw_trajectory, frame_size.
+입력은 손인식 HandResult의 frames(검지 끝 중심 crop), raw_trajectory, frame_size.
 crop 창의 위치(카메라 픽셀)는 raw_trajectory를 거꾸로 환산해서 구한다.
+좌우 반전은 Camera가 프레임에 먼저 하므로, 손인식 좌표·crop·여기 계산 모두 반전된 화면 기준 하나로 통일 (따로 뒤집지 않음).
 
 ① 배경 시간 노이즈 (02-2 프레임 차이)
    멈춤 구간에서 crop 창 위치가 똑같은 연속 두 장의 absdiff.
@@ -47,10 +48,10 @@ class FrameFeatures:
 # ---------------------------------------------------------------- crop 창 위치
 
 def crop_centers(raw_trajectory: np.ndarray, frame_size) -> np.ndarray:
-    """raw_trajectory(문제 이미지, 좌우 반전됨) → crop 창 중심 (카메라 정수 픽셀) (N, 2).
-    손인식은 카메라 정규화 좌표 tx를 1-tx로 뒤집어 문제 이미지에 매핑하고, crop은 원래 카메라 좌표에서 자른다."""
+    """raw_trajectory(문제 이미지 px) → crop 창 중심 (카메라 프레임 정수 px) (N, 2).
+    손인식은 (Camera가 이미 반전한) 프레임의 정규화 좌표를 그대로 문제 이미지에 선형 매핑하고, crop도 같은 프레임에서 자른다."""
     w, h = frame_size
-    tx = 1.0 - raw_trajectory[:, 0] / (PROBLEM_W - 1)
+    tx = raw_trajectory[:, 0] / (PROBLEM_W - 1)
     ty = raw_trajectory[:, 1] / (PROBLEM_H - 1)
     return np.rint(np.column_stack([tx * (w - 1), ty * (h - 1)])).astype(int)
 
@@ -104,7 +105,7 @@ def affine_residual(src: np.ndarray, dst: np.ndarray) -> float:
 
 
 def pair_deform(a: np.ndarray, b: np.ndarray, window_move: np.ndarray) -> tuple[float, float] | None:
-    """한 쌍의 (손 변형량, 변환 맞춤 오차). window_move = crop 창 이동 (crop 안 좌표, 좌우 반전 반영)."""
+    """한 쌍의 (손 변형량, 변환 맞춤 오차). window_move = crop 창 이동 (crop 안 좌표)."""
     pts, flow = track_corners(a, b)
     if len(flow) == 0:
         return None
@@ -124,8 +125,7 @@ def deformation(frames, centers: np.ndarray, moving: np.ndarray) -> tuple[float,
     for k in range(len(frames) - 1):
         if not (moving[k] and moving[k + 1]):
             continue
-        d = centers[k + 1] - centers[k]
-        d = np.array([-d[0], d[1]])     # crop은 좌우 반전되어 있으므로 x 방향을 뒤집는다
+        d = centers[k + 1] - centers[k]     # crop과 좌표가 같은 화면 기준이라 그대로 씀
         if not MIN_MOVE <= np.abs(d).max() <= MAX_MOVE:
             continue
         v = pair_deform(frames[k], frames[k + 1], d)

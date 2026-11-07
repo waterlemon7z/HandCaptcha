@@ -1,9 +1,9 @@
 # Asset Sources
 
 모든 이미지는 [Unsplash](https://unsplash.com)의 무료 사진이며 [Unsplash License](https://unsplash.com/license)를 따릅니다.
-상업·비상업 무료 사용과 수정이 허용되고 출처 표기 의무는 없지만, 보고서·발표 자료에는 아래 출처를 적는 것을 권장합니다.
+상업·비상업 무료 사용과 수정이 허용되고 출처 표기 의무는 없지만, 
+원본 출처를 다음 표와 같이 표기합니다.
 
-- 수집일: 2026-10-26 (물체 22개 추가: 2026-11-02)
 - 배경: 원본을 가로 1600px로 축소 (코드에서 16:9 중앙 크롭 후 1280×720으로 변환)
 - 물체: 흰 배경 사진을 [rembg](https://github.com/danielgatis/rembg)(`isnet-general-use` 모델)로 배경 제거 → 물체 영역 크롭 → 긴 변 500px 이하로 축소한 투명 PNG
 
@@ -49,30 +49,30 @@
 
 ### 추가 물체 (2026-11-02)
 
-| 파일 | 사진작가 | 원본 |
-|---|---|---|
-| `obj_apple_01.png` | Amit Lahav | https://unsplash.com/photos/rxN2MRdFJVg |
-| `obj_ball_01.png` | Glen Carrie | https://unsplash.com/photos/wLLL_IGg3Yc |
-| `obj_candle_01.png` | KaLisa Veer | https://unsplash.com/photos/Dk-If92Q7tY |
-| `obj_clock_01.png` | Abdul Artega | https://unsplash.com/photos/CxRBtNe243k |
-| `obj_coffee_01.png` | Mockup Graphics | https://unsplash.com/photos/gkzFuyAeXeY |
-| `obj_crayon_01.png` | Nik | https://unsplash.com/photos/m8qFTh2qcTQ |
-| `obj_cube_01.png` | William Warby | https://unsplash.com/photos/ViJ28AsHsXc |
-| `obj_dinosaur_01.png` | Lucas George Wendt | https://unsplash.com/photos/a9CETXoTKaY |
-| `obj_mouse_01.png` | Andrey Matveev | https://unsplash.com/photos/7eZeXqKAywU |
-| `obj_paintbrush_01.png` | Artiom Vallat | https://unsplash.com/photos/v6n0iUuD4M0 |
-| `obj_pinecone_01.png` | Jennifer Burk | https://unsplash.com/photos/CpY1O3_5bUk |
-| `obj_scissors_01.png` | Gabriel Mihalcea | https://unsplash.com/photos/5KJzOlsDvVw |
-| `obj_seashell_01.png` | Content Pixie | https://unsplash.com/photos/loZ_0TCJNUY |
-| `obj_seashell_02.png` | Natalia Gasiorowska | https://unsplash.com/photos/plELgxMbjTE |
-| `obj_shapesorter_01.png` | Angie Dutton | https://unsplash.com/photos/E1shiIGT8Oo |
-| `obj_stapler_01.png` | Brett Jordan | https://unsplash.com/photos/xG5caIE3tLU |
-| `obj_succulent_01.png` | (이름 미표시) | https://unsplash.com/photos/n4aCJ0yrZXE |
-| `obj_tapemeasure_01.png` | William Warby | https://unsplash.com/photos/M779tNeoSKc |
-| `obj_walnut_01.png` | Mockup Graphics | https://unsplash.com/photos/YXWRE_zJrDE |
-| `obj_washitape_01.png` | Kelly Sikkema | https://unsplash.com/photos/OJxSei48cbU |
-| `obj_watch_01.png` | Adriano Pucciarelli | https://unsplash.com/photos/ZFR1RlZWyF0 |
-| `obj_yarn_01.png` | Ilya Chunin | https://unsplash.com/photos/V8aFZHuLpEY |
+| 파일                       | 사진작가                | 원본                                      |
+| ------------------------ | ------------------- | --------------------------------------- |
+| `obj_apple_01.png`       | Amit Lahav          | https://unsplash.com/photos/rxN2MRdFJVg |
+| `obj_ball_01.png`        | Glen Carrie         | https://unsplash.com/photos/wLLL_IGg3Yc |
+| `obj_candle_01.png`      | KaLisa Veer         | https://unsplash.com/photos/Dk-If92Q7tY |
+| `obj_clock_01.png`       | Abdul Artega        | https://unsplash.com/photos/CxRBtNe243k |
+| `obj_coffee_01.png`      | Mockup Graphics     | https://unsplash.com/photos/gkzFuyAeXeY |
+| `obj_crayon_01.png`      | Nik                 | https://unsplash.com/photos/m8qFTh2qcTQ |
+| `obj_cube_01.png`        | William Warby       | https://unsplash.com/photos/ViJ28AsHsXc |
+| `obj_dinosaur_01.png`    | Lucas George Wendt  | https://unsplash.com/photos/a9CETXoTKaY |
+| `obj_mouse_01.png`       | Andrey Matveev      | https://unsplash.com/photos/7eZeXqKAywU |
+| `obj_paintbrush_01.png`  | Artiom Vallat       | https://unsplash.com/photos/v6n0iUuD4M0 |
+| `obj_pinecone_01.png`    | Jennifer Burk       | https://unsplash.com/photos/CpY1O3_5bUk |
+| `obj_scissors_01.png`    | Gabriel Mihalcea    | https://unsplash.com/photos/5KJzOlsDvVw |
+| `obj_seashell_01.png`    | Content Pixie       | https://unsplash.com/photos/loZ_0TCJNUY |
+| `obj_seashell_02.png`    | Natalia Gasiorowska | https://unsplash.com/photos/plELgxMbjTE |
+| `obj_shapesorter_01.png` | Angie Dutton        | https://unsplash.com/photos/E1shiIGT8Oo |
+| `obj_stapler_01.png`     | Brett Jordan        | https://unsplash.com/photos/xG5caIE3tLU |
+| `obj_succulent_01.png`   | (이름 미표시)            | https://unsplash.com/photos/n4aCJ0yrZXE |
+| `obj_tapemeasure_01.png` | William Warby       | https://unsplash.com/photos/M779tNeoSKc |
+| `obj_walnut_01.png`      | Mockup Graphics     | https://unsplash.com/photos/YXWRE_zJrDE |
+| `obj_washitape_01.png`   | Kelly Sikkema       | https://unsplash.com/photos/OJxSei48cbU |
+| `obj_watch_01.png`       | Adriano Pucciarelli | https://unsplash.com/photos/ZFR1RlZWyF0 |
+| `obj_yarn_01.png`        | Ilya Chunin         | https://unsplash.com/photos/V8aFZHuLpEY |
 
 ## 파일 이름 규칙
 

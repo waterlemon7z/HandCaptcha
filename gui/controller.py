@@ -63,6 +63,9 @@ class Controller(QObject):
         # GUI → Controller: 버튼 이벤트
         view.refresh_requested.connect(self.refresh)
         view.confirm_requested.connect(self.confirm)
+        view.camera_show_rate_changed.connect(
+            task_worker.set_camera_show_rate, Qt.ConnectionType.QueuedConnection
+        )
 
     def _set_state(self, state):
         self.state = state
@@ -157,7 +160,7 @@ class Controller(QObject):
             return
         self._set_state("ANSWER_CORRECT" if correct else "ANSWER_INCORRECT")
         self.view.set_status(
-            "정답입니다. confirm 버튼을 누르면 다시 시작합니다." if correct
+            "정답입니다. 확인 버튼을 누르면 다시 시작합니다." if correct
             else "오답입니다. confirm 버튼을 누르면 다시 시작합니다."
         )
 

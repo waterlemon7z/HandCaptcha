@@ -5,7 +5,10 @@ Role    : GUI의 버튼 클릭과 같은 이슈를 Signal로 함수 연동
 """
 import sys
 import numpy as np
-from PySide6.QtWidgets import QMainWindow, QGraphicsScene, QApplication
+from PySide6.QtWidgets import (
+    QMainWindow, QGraphicsScene, QApplication, QMenu, QWidgetAction,
+    QWidget, QVBoxLayout, QLabel, QSlider,
+)
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QImage, QPixmap, QPen, QColor
 from gui.handcaptcha import Ui_MainWindow
@@ -13,12 +16,14 @@ from gui.handcaptcha import Ui_MainWindow
 class HandCaptchaUI(QMainWindow):
     refresh_requested = Signal()
     confirm_requested = Signal()
+    camera_show_rate_changed = Signal(float)
 
     def __init__(self):
         super().__init__()
 
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
+        self._setup_camera_rate_menu()
 
         self.scene = QGraphicsScene(self)
         self.ui.bigImg.setScene(self.scene)
@@ -37,6 +42,32 @@ class HandCaptchaUI(QMainWindow):
     def connect_events(self):
         self.ui.refreshButton.clicked.connect(self.refresh_requested.emit)
         self.ui.confirm.clicked.connect(self.confirm_requested.emit)
+
+    def _setup_camera_rate_menu(self):
+        self.camera_rate_menu = QMenu(self)
+        panel = QWidget(self.camera_rate_menu)
+        panel.setMinimumWidth(240)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(16, 12, 16, 12)
+        self.camera_rate_label = QLabel("카메라 비율: 0%", panel)
+        layout.addWidget(self.camera_rate_label)
+        self.camera_rate_slider = QSlider(Qt.Orientation.Horizontal, panel)
+        self.camera_rate_slider.setRange(0, 100)
+        self.camera_rate_slider.setValue(0)
+        self.camera_rate_slider.setAccessibleName("카메라 비율 (%)")
+        layout.addWidget(self.camera_rate_slider)
+        layout.addWidget(QLabel("0% 문제만 · 100% 카메라만", panel))
+        action = QWidgetAction(self.camera_rate_menu)
+        action.setDefaultWidget(panel)
+        self.camera_rate_menu.addAction(action)
+        self.ui.cameraRateButton.setMenu(self.camera_rate_menu)
+        self.camera_rate_slider.valueChanged.connect(self._on_camera_rate_changed)
+
+    @Slot(int)
+    def _on_camera_rate_changed(self, percent):
+        self.ui.cameraRateButton.setText(f"{percent}%")
+        self.camera_rate_label.setText(f"카메라 비율: {percent}%")
+        self.camera_show_rate_changed.emit(percent / 100.0)
 
     def verification_method(self):
         return self.ui.verificationCombo.currentData()

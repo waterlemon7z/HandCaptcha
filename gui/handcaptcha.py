@@ -58,7 +58,7 @@ class Ui_MainWindow(object):
 "QWidget#footerWidget {\n"
 "    background-color: #FFFFFF;\n"
 "}\n"
-"QPushButton#refreshButton, QPushButton#infoButton {\n"
+"QPushButton#refreshButton {\n"
 "    background-color: transparent;\n"
 "    color: #667587;\n"
 "    border: 1px solid transparent;\n"
@@ -66,7 +66,7 @@ class Ui_MainWindow(object):
 "    font-size: 23px;\n"
 "    padding: 2px 6px;\n"
 "}\n"
-"QComboBox#verificationCombo {\n"
+"QComboBox#verificationCombo, QPushButton#cameraRateButton {\n"
 "    color: #667587;\n"
 "    background-color: transparent;\n"
 "    border: 1px solid #D5DCE4;\n"
@@ -74,7 +74,7 @@ class Ui_MainWindow(object):
 "    font-size: 13px;\n"
 "    padding: 6px;\n"
 "}\n"
-"QPushButton#refreshButton:hover, QPushButton#infoButton:hover {\n"
+"QPushButton#refreshButton:hover {\n"
 "    background-color: #EDF2F8;\n"
 "    border-color: #E2E8F0;\n"
 "}\n"
@@ -190,11 +190,12 @@ class Ui_MainWindow(object):
 
         self.footerLayout.addWidget(self.refreshButton)
 
-        self.infoButton = QPushButton(self.footerWidget)
-        self.infoButton.setObjectName(u"infoButton")
-        self.infoButton.setMinimumSize(QSize(44, 44))
+        self.cameraRateButton = QPushButton(self.footerWidget)
+        self.cameraRateButton.setObjectName(u"cameraRateButton")
+        self.cameraRateButton.setMinimumSize(QSize(64, 36))
+        self.cameraRateButton.setAccessibleName("카메라 비율")
 
-        self.footerLayout.addWidget(self.infoButton)
+        self.footerLayout.addWidget(self.cameraRateButton)
 
         self.verificationCombo = QComboBox(self.footerWidget)
         self.verificationCombo.setObjectName(u"verificationCombo")
@@ -252,10 +253,8 @@ class Ui_MainWindow(object):
         self.refreshButton.setToolTip(QCoreApplication.translate("MainWindow", u"\ub2e4\ub978 CAPTCHA", None))
 #endif // QT_CONFIG(tooltip)
         self.refreshButton.setText(QCoreApplication.translate("MainWindow", u"\u21bb", None))
-#if QT_CONFIG(tooltip)
-        self.infoButton.setToolTip(QCoreApplication.translate("MainWindow", u"\uc0ac\uc6a9 \ubc29\ubc95", None))
-#endif // QT_CONFIG(tooltip)
-        self.infoButton.setText(QCoreApplication.translate("MainWindow", u"\u24d8", None))
+        self.cameraRateButton.setText("0%")
+        self.cameraRateButton.setToolTip("카메라 비율 조절 (0%: 문제만, 100%: 카메라만)")
         self.verificationCombo.setToolTip("캡챠 자동 풀이 검증 방식. 다음 문제 생성부터 적용됩니다.")
         self.statueLabel.setText(QCoreApplication.translate("MainWindow", u"Status:", None))
         self.statusValue.setText(QCoreApplication.translate("MainWindow", u"READY", None))

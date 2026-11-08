@@ -27,7 +27,13 @@ class TaskWorker(QObject):
         self._frame_pending = False
         self._problem_id = None
         self._tracking_request_id = 0
+        self.camera_show_rate = 0.0
         self._frame_requested.connect(self._process_latest_frame, Qt.ConnectionType.QueuedConnection)
+
+    @Slot(float)
+    def set_camera_show_rate(self, rate):
+        """GUI에서 받은 카메라 비중(0~1)을 다음 프레임부터 적용한다."""
+        self.camera_show_rate = max(0.0, min(1.0, rate))
 
     @Slot(object)
     def submit_frame(self, frame):
@@ -41,7 +47,6 @@ class TaskWorker(QObject):
 
     @Slot()
     def _process_latest_frame(self):
-        camera_show_rate = 0.
         with self._frame_lock:
             # 웹캠에서 들어온 frame 중 마지막 프레임만 사용
             frame = self._latest_frame
@@ -73,8 +78,8 @@ class TaskWorker(QObject):
                 if camera.shape[:2] != (height, width):
                     camera = cv2.resize(camera, (width, height))
                 canvas = cv2.addWeighted(
-                    camera, camera_show_rate,  # 카메라 비중
-                    canvas, 1.-camera_show_rate,  # 캡챠 비중
+                    camera, self.camera_show_rate,  # 카메라 비중
+                    canvas, 1.0 - self.camera_show_rate,  # 캡챠 비중
                     0,
                 )
                 self.canvas_ready.emit(self._tracking_request_id, canvas)

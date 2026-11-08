@@ -1,7 +1,8 @@
 """영상 검사 (진위검출 2단계): 이 crop들이 진짜 카메라로 찍은 진짜 손인가.
 
-입력은 손인식 HandResult의 frames(검지 끝 중심 crop, 좌우 반전), raw_trajectory, frame_size.
+입력은 손인식 HandResult의 frames(검지 끝 중심 crop), raw_trajectory, frame_size.
 crop 창의 위치(카메라 픽셀)는 raw_trajectory를 거꾸로 환산해서 구한다.
+좌우 반전은 Camera가 프레임에 먼저 하므로, 손인식 좌표·crop·여기 계산 모두 반전된 화면 기준 하나로 통일 (따로 뒤집지 않음).
 
 ① 배경 시간 노이즈 (02-2 프레임 차이)
    멈춤 구간에서 crop 창 위치가 똑같은 연속 두 장의 absdiff.
@@ -27,9 +28,14 @@ import numpy as np
 from backend.bot_detection.trajectory import split_dwell
 
 PROBLEM_W, PROBLEM_H = 1280, 720
-MIN_MOVE, MAX_MOVE = 3, 32      # ②에 쓸 crop 창 이동량 범위 (카메라 px). 너무 작으면 손/배경 구분 불가, 크면 안 겹침
+MIN_MOVE, MAX_MOVE = 3, 32      # ②에 쓸 crop 창 이동량 범위 (카메라 px, 폭 640 기준). 너무 작으면 손/배경 구분 불가, 크면 안 겹침
+MAX_MOVE_REF_W = 640            # MAX_MOVE는 카메라 폭에 비례해 늘림 (1280이면 64). 같은 손 속도면 화면이 클수록 px 이동이 커서
 MIN_HAND_POINTS = 4             # ②에서 손으로 분류된 점이 이보다 적으면 그 쌍은 건너뜀
 FB_MAX_ERR = 0.5                # LK 앞→뒤 추적 오차가 이보다 크면 그 점은 버림 (px)
+HARRIS_QUALITY = 0.001          # Harris 코너 품질 기준 (가장 강한 코너 대비 비율). 낮추면 어두운·먼 손에서도 코너가 더 나옴
+MAX_CORNERS = 150               #   0.01/60 → 0.001/150: 사람 재측정 8→3/59, 사람 affine 최소 0.17→0.33 (봇 최대 0.05 그대로)
+MAX_GAP = 0.15                  # 이웃한 crop 두 장의 시간 간격이 이보다 크면(중간 프레임을 놓침) 그 쌍은 안 씀 (초).
+                                #   보통 간격 0.03~0.047초 (1280×720에서 녹화당 1~4번 끊김)
 
 
 @dataclass
@@ -47,16 +53,41 @@ class FrameFeatures:
 # ---------------------------------------------------------------- crop 창 위치
 
 def crop_centers(raw_trajectory: np.ndarray, frame_size) -> np.ndarray:
-    """raw_trajectory(문제 이미지, 좌우 반전됨) → crop 창 중심 (카메라 정수 픽셀) (N, 2).
-    손인식은 카메라 정규화 좌표 tx를 1-tx로 뒤집어 문제 이미지에 매핑하고, crop은 원래 카메라 좌표에서 자른다."""
+    """raw_trajectory(문제 이미지 px) → crop 창 중심 (카메라 프레임 정수 px) (N, 2).
+    손인식은 (Camera가 이미 반전한) 프레임의 정규화 좌표를 그대로 문제 이미지에 선형 매핑하고, crop도 같은 프레임에서 자른다."""
     w, h = frame_size
-    tx = 1.0 - raw_trajectory[:, 0] / (PROBLEM_W - 1)
+    tx = raw_trajectory[:, 0] / (PROBLEM_W - 1)
     ty = raw_trajectory[:, 1] / (PROBLEM_H - 1)
     return np.rint(np.column_stack([tx * (w - 1), ty * (h - 1)])).astype(int)
 
 
 def to_gray(frame: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+
+
+def frame_valid(frames) -> np.ndarray:
+    """쓸 수 있는 crop인가 (N,). 크기가 다른 것(손끝이 화면 밖 멀리 → 손인식 crop이 깨짐)과
+    전부 검정인 것(화면 밖만 잘림)은 제외. 이런 프레임이 낀 쌍은 검사에서 건너뜀 (보수적: 검증 불가 = 통과)."""
+    if len(frames) == 0:
+        return np.zeros(0, bool)
+    shapes = [getattr(f, "shape", None) for f in frames]
+    common = max(set(shapes), key=shapes.count)
+    return np.array([s == common and bool(np.any(f)) for s, f in zip(shapes, frames)])
+
+
+def usable_pairs(frames, timestamps: np.ndarray | None = None) -> np.ndarray:
+    """(k, k+1) 쌍을 쓸 수 있는가 (N-1,). 두 장 다 정상 crop이고, 시간 간격이 MAX_GAP 이하이고, 중복 프레임이 아님.
+    중복 = 픽셀까지 완전히 같은 두 장. 1280×720에서 카메라가 같은 프레임을 두 번 주는 일이 있음 (새 녹화 34개 중 14개).
+    진짜 카메라는 새로 찍으면 센서 노이즈 때문에 절대 완전히 같을 수 없으므로 '새 프레임 아님'으로 보고 뺀다.
+    (안 빼면 ① zero_ratio가 1.0, ②' affine_res가 0으로 끌려가 사람을 봇으로 오판)"""
+    valid = frame_valid(frames)
+    ok = valid[:-1] & valid[1:]
+    for k in np.flatnonzero(ok):
+        if np.array_equal(frames[k], frames[k + 1]):
+            ok[k] = False
+    if timestamps is not None and len(timestamps) == len(frames):
+        ok &= np.diff(np.asarray(timestamps, dtype=np.float64)) <= MAX_GAP
+    return ok
 
 
 # ---------------------------------------------------------------- ① 배경 시간 노이즈
@@ -66,11 +97,12 @@ def zero_ratio(a: np.ndarray, b: np.ndarray) -> float:
     return float((cv2.absdiff(to_gray(a), to_gray(b)) == 0).mean())
 
 
-def temporal_noise(frames, centers: np.ndarray, dwell: np.ndarray) -> tuple[float, int]:
+def temporal_noise(frames, centers: np.ndarray, dwell: np.ndarray, pair_ok: np.ndarray | None = None) -> tuple[float, int]:
     """멈춤 구간에서 창 위치가 같은 연속 쌍들의 zero_ratio 중앙값."""
+    pair_ok = usable_pairs(frames) if pair_ok is None else pair_ok
     vals = [zero_ratio(frames[k], frames[k + 1])
             for k in range(len(frames) - 1)
-            if dwell[k] and dwell[k + 1] and (centers[k] == centers[k + 1]).all()]
+            if pair_ok[k] and dwell[k] and dwell[k + 1] and (centers[k] == centers[k + 1]).all()]
     return (float(np.median(vals)) if vals else float("nan")), len(vals)
 
 
@@ -79,7 +111,7 @@ def temporal_noise(frames, centers: np.ndarray, dwell: np.ndarray) -> tuple[floa
 def track_corners(a: np.ndarray, b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """a의 Harris 코너를 b로 피라미드 LK 추적. 앞→뒤 추적이 어긋나는 점은 버린다. (시작점, 이동 벡터)."""
     ga, gb = to_gray(a), to_gray(b)
-    pts = cv2.goodFeaturesToTrack(ga, maxCorners=60, qualityLevel=0.01, minDistance=4,
+    pts = cv2.goodFeaturesToTrack(ga, maxCorners=MAX_CORNERS, qualityLevel=HARRIS_QUALITY, minDistance=4,
                                   useHarrisDetector=True, k=0.04)
     if pts is None:
         return np.empty((0, 2)), np.empty((0, 2))
@@ -104,7 +136,7 @@ def affine_residual(src: np.ndarray, dst: np.ndarray) -> float:
 
 
 def pair_deform(a: np.ndarray, b: np.ndarray, window_move: np.ndarray) -> tuple[float, float] | None:
-    """한 쌍의 (손 변형량, 변환 맞춤 오차). window_move = crop 창 이동 (crop 안 좌표, 좌우 반전 반영)."""
+    """한 쌍의 (손 변형량, 변환 맞춤 오차). window_move = crop 창 이동 (crop 안 좌표)."""
     pts, flow = track_corners(a, b)
     if len(flow) == 0:
         return None
@@ -118,15 +150,16 @@ def pair_deform(a: np.ndarray, b: np.ndarray, window_move: np.ndarray) -> tuple[
     return spread, affine_residual(src, src + hand)
 
 
-def deformation(frames, centers: np.ndarray, moving: np.ndarray) -> tuple[float, int, float]:
+def deformation(frames, centers: np.ndarray, moving: np.ndarray,
+                pair_ok: np.ndarray | None = None, max_move: float = MAX_MOVE) -> tuple[float, int, float]:
     """이동 구간 쌍들의 (손 변형량 중앙값, 쓴 쌍 수, 변환 맞춤 오차 중앙값)."""
+    pair_ok = usable_pairs(frames) if pair_ok is None else pair_ok
     vals, res = [], []
     for k in range(len(frames) - 1):
-        if not (moving[k] and moving[k + 1]):
+        if not (moving[k] and moving[k + 1] and pair_ok[k]):
             continue
-        d = centers[k + 1] - centers[k]
-        d = np.array([-d[0], d[1]])     # crop은 좌우 반전되어 있으므로 x 방향을 뒤집는다
-        if not MIN_MOVE <= np.abs(d).max() <= MAX_MOVE:
+        d = centers[k + 1] - centers[k]     # crop과 좌표가 같은 화면 기준이라 그대로 씀
+        if not MIN_MOVE <= np.abs(d).max() <= max_move:
             continue
         v = pair_deform(frames[k], frames[k + 1], d)
         if v is not None:
@@ -142,9 +175,12 @@ def deformation(frames, centers: np.ndarray, moving: np.ndarray) -> tuple[float,
 def extract(frames, raw_trajectory: np.ndarray, timestamps: np.ndarray, frame_size) -> FrameFeatures:
     raw = np.asarray(raw_trajectory, dtype=np.float64)
     centers = crop_centers(raw, frame_size)
-    dwell = split_dwell(raw, np.asarray(timestamps, dtype=np.float64))
-    zr, zn = temporal_noise(frames, centers, dwell)
-    df, dn, ar = deformation(frames, centers, ~dwell)
+    times = np.asarray(timestamps, dtype=np.float64)
+    dwell = split_dwell(raw, times)
+    pair_ok = usable_pairs(frames, times)
+    zr, zn = temporal_noise(frames, centers, dwell, pair_ok)
+    max_move = MAX_MOVE * max(1.0, frame_size[0] / MAX_MOVE_REF_W)
+    df, dn, ar = deformation(frames, centers, ~dwell, pair_ok, max_move)
     return FrameFeatures(zr, zn, df, dn, ar)
 
 
@@ -155,7 +191,7 @@ if __name__ == "__main__":
 
     from backend.bot_detection.record import load_recording
 
-    data_dir = Path(__file__).resolve().parents[1] / "test" / "data"
+    data_dir = Path(__file__).resolve().parent / "test" / "data"
     files = sorted(glob.glob(str(data_dir / "human" / "*.npz"))) + \
         sorted(glob.glob(str(data_dir / "synth" / "S*" / "*.npz")))
     groups: dict[str, list[FrameFeatures]] = {}

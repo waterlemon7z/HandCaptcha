@@ -19,11 +19,6 @@ from dataclasses import asdict, dataclass
 
 import cv2
 import numpy as np
-import glob
-from pathlib import Path
-
-from backend.bot_detection.mock import load_csv
-from backend.bot_detection.record import load_recording
 
 STOP_SECONDS = 1.0      # 손인식 stop_seconds와 같게
 STOP_PIXELS = 15.0      # 손인식 stop_pixels와 같게
@@ -137,8 +132,13 @@ def extract(points: np.ndarray, times: np.ndarray) -> TrajectoryFeatures:
 
 if __name__ == "__main__":
     # 봇 목데이터 vs 사람 녹화의 특징 분포 비교
+    import glob
+    from pathlib import Path
 
-    data_dir = Path(__file__).resolve().parents[1] / "test" / "data"
+    from backend.bot_detection.mock import load_csv
+    from backend.bot_detection.record import load_recording
+
+    data_dir = Path(__file__).resolve().parent / "test" / "data"
     groups: dict[str, list[TrajectoryFeatures]] = {}
     for f in sorted(glob.glob(str(data_dir / "bot" / "*.csv"))):
         m = load_csv(f)

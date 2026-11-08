@@ -94,11 +94,11 @@ class ProblemGenerator:
 
         image: 물체 NUM_OBJECTS개를 숨긴 합성 이미지 (H×W×3 BGR)
         target: 찾아야 할 정답 물체의 원본 이미지 (BGRA). 사용자 화면에 "이것을 찾으세요"로 보여 주고, 검수 입력으로도 쓴다
-        verification_method: 자동 풀이 검증 방식(auto=ORB/SIFT, orb, sift).
+        verification_method: 자동 풀이 검증 방식(auto=ORB/SIFT, orb, sift, owlv2).
         정답은 반환하지 않는다.
         """
-        if verification_method not in ("auto", "orb", "sift"):
-            raise ValueError("verification_method는 auto, orb, sift 중 하나여야 합니다.")
+        if verification_method not in ("auto", "orb", "sift", "owlv2"):
+            raise ValueError("verification_method는 auto, orb, sift, owlv2 중 하나여야 합니다.")
         if seed is None:
             seed = secrets.randbits(32)
         # 재생성도 같은 rng를 이어 쓰므로 seed와 validator가 같으면 최종 문제도 같다

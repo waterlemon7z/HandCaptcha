@@ -21,6 +21,8 @@ from typing import Optional
 import cv2
 import numpy as np
 
+from logger import INFO
+
 # MediaPipe 손 랜드마크 번호
 WRIST = 0
 INDEX_TIP = 8                                        # 검지 끝 (커서 기준점, crop 중심)
@@ -187,7 +189,7 @@ class HandTracker:
         self._panel = None
         self.reset()
         if problem_img is not None and hint_img is not None:
-            print('No')
+            INFO('Captcha Image ready')
             self.height, self.width = problem_img.shape[:2]
             self._panel = self._build_hint_panel()
             self.ready = True

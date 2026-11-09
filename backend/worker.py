@@ -9,6 +9,8 @@ from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from backend.bot_detection import detector
 from cv.hand_tracking.hand_tracker import HandTracker, get_stop_box
 from cv.problem_gen import ProblemGenerator
+from logger import DEBUG
+
 
 class TaskWorker(QObject):
     captcha_ready = Signal(int, object, object)
@@ -93,7 +95,7 @@ class TaskWorker(QObject):
                     self._problem_id = None
                     if answer["correct"]:
                         is_human, comment = detector.check(result)
-                        print(f"{is_human} | {comment}")
+                        DEBUG(f"{is_human} | {comment}")
                     if not self._cancelled():
                         self.verification_ready.emit(
                             self._tracking_request_id, bool(answer["correct"])

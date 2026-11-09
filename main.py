@@ -9,9 +9,11 @@ from cv.problem_gen import ProblemGenerator
 from gui.controller import Controller
 from gui.signal import HandCaptchaUI
 from cv.verification.difficulty_check import DifficultyCheck
+from logger import INFO
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    INFO('Program started')
     dif = DifficultyCheck()
     window = HandCaptchaUI()
     generator = ProblemGenerator(validator=dif)

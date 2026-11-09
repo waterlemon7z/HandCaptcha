@@ -7,6 +7,9 @@ import cv2
 import numpy as np
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 
+from logger import ERROR
+
+
 class Controller(QObject):
     generate_requested = Signal(int, str)
 
@@ -121,7 +124,7 @@ class Controller(QObject):
     @Slot(str)
     def on_camera_error(self, message):
         if not self._closing:
-            print(message)
+            ERROR(message)
             self._camera_failed = True
             if self.state not in ("ANSWER_CORRECT", "ANSWER_INCORRECT"):
                 self._set_state("CAMERA_ERROR")
@@ -167,7 +170,7 @@ class Controller(QObject):
     @Slot(int, str)
     def on_task_error(self, request_id, message):
         if not self._closing and request_id == self._request_id:
-            print(message)
+            ERROR(message)
             self._set_state("ERROR")
 
     @Slot()

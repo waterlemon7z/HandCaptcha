@@ -231,8 +231,6 @@ backend/bot_detection/qna.md
 backend/bot_detection/cnn/*.npz
 backend/bot_detection/cnn/*.pt
 cv/hand_tracking/CLAUDE.md
-# MediaPipe 손 모델 (download_model.py로 각자 받음)
-cv/hand_tracking/models/
 
 # 실험 결과 이미지 및 데이터 제외
 test_results/

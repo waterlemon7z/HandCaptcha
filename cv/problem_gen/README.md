@@ -33,7 +33,7 @@ from cv.verification.difficulty_check import DifficultyCheck
 
 gen = ProblemGenerator("assets", validator=DifficultyCheck(), max_attempts=5)
 
-problem_id, image, target = gen.create(verification_method="auto")   # 정답은 반환하지 않음
+problem_id, image, target = gen.create(verification_method="orb/sift")   # 정답은 반환하지 않음
 # image → 화면에 표시, target → "이것을 찾으세요"로 표시
 
 result = gen.solve(problem_id, (x1, y1, x2, y2))   # 손 인식이 준 박스로 판정
@@ -52,12 +52,12 @@ x1, y1, x2, y2 = result["answer_box"]              # 맞든 틀리든 정답 위
 
 `objects/`의 물체가 3개보다 적으면 `ValueError`를 낸다.
 
-### `create(seed=None, *, verification_method="auto")`
+### `create(seed=None, *, verification_method="orb/sift")`
 
 | 인자 | 형식 | 기본값 | 설명 |
 |---|---|---|---|
 | `seed` | `int` 또는 `None` | `None` | 같은 seed면 같은 문제. `None`이면 무작위 |
-| `verification_method` | `"auto"` / `"orb"` / `"sift"` | `"auto"` | 키워드로만 받는다. validator가 `difficult_check` 메서드를 가진 객체일 때 그대로 넘긴다. 그 밖의 값은 `ValueError` |
+| `verification_method` | `"orb/sift"` / `"orb"` / `"sift"` | `"orb/sift"` | 키워드로만 받는다. validator가 `difficult_check` 메서드를 가진 객체일 때 그대로 넘긴다. 그 밖의 값은 `ValueError` |
 
 반환: `(problem_id, image, target)`
 

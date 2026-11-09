@@ -44,8 +44,8 @@ def main():
 
     checker = DifficultyCheck()
     total = TOTAL
-    detected_count = {method: 0 for method in (*METHODS, "auto")}
-    correct_count = {method: 0 for method in (*METHODS, "auto")}
+    detected_count = {method: 0 for method in (*METHODS, "orb/sift")}
+    correct_count = {method: 0 for method in (*METHODS, "orb/sift")}
 
     for seed in range(total):
         problem_id, image, target = generator.create(seed=seed)
@@ -60,7 +60,7 @@ def main():
             for method in METHODS
         }
         # auto와 같은 합집합: 후보 중 하나라도 정답이면 성공이다.
-        boxes_by_method["auto"] = list(dict.fromkeys(
+        boxes_by_method["orb/sift"] = list(dict.fromkeys(
             box for method in METHODS for box in boxes_by_method[method]
         ))
 
@@ -76,7 +76,7 @@ def main():
 
         # solve()는 정답을 폐기하므로 한 번만 호출한 뒤,
         # 공개된 정답으로 모든 후보를 생성기와 동일한 기준에서 평가한다.
-        submitted_boxes = boxes_by_method["auto"]
+        submitted_boxes = boxes_by_method["orb/sift"]
         answer = generator.solve(
             problem_id, submitted_boxes[0] if submitted_boxes else (0, 0, 0, 0)
         )
@@ -126,7 +126,7 @@ def main():
 
     print("\n===== 테스트 결과 =====")
     for method in detected_count:
-        label = "ORB 또는 SIFT" if method == "auto" else method.upper()
+        label = "ORB 또는 SIFT" if method == "orb/sift" else method.upper()
         print(f"{label}: 위치 추정 {detected_count[method]}/{total}, "
               f"정답 검출 {correct_count[method]}/{total}")
     print(f"결과 이미지: {output_dir}")

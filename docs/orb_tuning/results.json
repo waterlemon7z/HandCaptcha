@@ -1,0 +1,165 @@
+{
+  "opencv": "5.0.0",
+  "selection": [
+    {
+      "seeds": [
+        0,
+        59
+      ],
+      "configs": {
+        "baseline": {
+          "nfeatures": 3000,
+          "scaleFactor": 1.2,
+          "nlevels": 8,
+          "edgeThreshold": 15,
+          "patchSize": 31,
+          "fastThreshold": 20
+        },
+        "scale_only": {
+          "nfeatures": 3000,
+          "scaleFactor": 1.15,
+          "nlevels": 16,
+          "edgeThreshold": 15,
+          "patchSize": 31,
+          "fastThreshold": 20
+        },
+        "small_patch21": {
+          "nfeatures": 3000,
+          "scaleFactor": 1.15,
+          "nlevels": 16,
+          "edgeThreshold": 21,
+          "patchSize": 21,
+          "fastThreshold": 10
+        },
+        "small_patch15": {
+          "nfeatures": 3000,
+          "scaleFactor": 1.15,
+          "nlevels": 16,
+          "edgeThreshold": 15,
+          "patchSize": 15,
+          "fastThreshold": 10
+        }
+      },
+      "results": {
+        "baseline": {
+          "correct": 2,
+          "incorrect": 0,
+          "seconds": 0.9870952540368307
+        },
+        "scale_only": {
+          "correct": 3,
+          "incorrect": 0,
+          "seconds": 1.1631114181654993
+        },
+        "small_patch21": {
+          "correct": 2,
+          "incorrect": 0,
+          "seconds": 1.7573788730951492
+        },
+        "small_patch15": {
+          "correct": 0,
+          "incorrect": 0,
+          "seconds": 1.9357144148088992
+        }
+      }
+    },
+    {
+      "seeds": [
+        0,
+        59
+      ],
+      "configs": {
+        "scale_fast10": {
+          "nfeatures": 3000,
+          "scaleFactor": 1.15,
+          "nlevels": 16,
+          "edgeThreshold": 15,
+          "patchSize": 31,
+          "fastThreshold": 10
+        },
+        "wide_fast10": {
+          "nfeatures": 3000,
+          "scaleFactor": 1.2,
+          "nlevels": 16,
+          "edgeThreshold": 15,
+          "patchSize": 31,
+          "fastThreshold": 10
+        },
+        "wide_patch21": {
+          "nfeatures": 3000,
+          "scaleFactor": 1.2,
+          "nlevels": 16,
+          "edgeThreshold": 21,
+          "patchSize": 21,
+          "fastThreshold": 10
+        },
+        "dense_fast10": {
+          "nfeatures": 3000,
+          "scaleFactor": 1.1,
+          "nlevels": 24,
+          "edgeThreshold": 15,
+          "patchSize": 31,
+          "fastThreshold": 10
+        }
+      },
+      "results": {
+        "scale_fast10": {
+          "correct": 3,
+          "incorrect": 0,
+          "seconds": 1.476142923173029
+        },
+        "wide_fast10": {
+          "correct": 5,
+          "incorrect": 1,
+          "seconds": 1.263326291955309
+        },
+        "wide_patch21": {
+          "correct": 1,
+          "incorrect": 0,
+          "seconds": 1.5430244160816073
+        },
+        "dense_fast10": {
+          "correct": 3,
+          "incorrect": 0,
+          "seconds": 1.795106749952538
+        }
+      }
+    }
+  ],
+  "validation": {
+    "seeds": [
+      100,
+      199
+    ],
+    "configs": {
+      "baseline": {
+        "nfeatures": 3000,
+        "scaleFactor": 1.2,
+        "nlevels": 8,
+        "edgeThreshold": 15,
+        "patchSize": 31,
+        "fastThreshold": 20
+      },
+      "improved": {
+        "nfeatures": 3000,
+        "scaleFactor": 1.2,
+        "nlevels": 16,
+        "edgeThreshold": 15,
+        "patchSize": 31,
+        "fastThreshold": 10
+      }
+    },
+    "results": {
+      "baseline": {
+        "correct": 6,
+        "incorrect": 1,
+        "seconds": 1.6195979599724524
+      },
+      "improved": {
+        "correct": 7,
+        "incorrect": 0,
+        "seconds": 2.004649335198337
+      }
+    }
+  }
+}

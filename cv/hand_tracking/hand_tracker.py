@@ -189,7 +189,6 @@ class HandTracker:
         self._panel = None
         self.reset()
         if problem_img is not None and hint_img is not None:
-            INFO('Captcha Image ready')
             self.height, self.width = problem_img.shape[:2]
             self._panel = self._build_hint_panel()
             self.ready = True

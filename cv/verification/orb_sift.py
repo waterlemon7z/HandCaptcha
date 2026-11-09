@@ -21,7 +21,16 @@ class OrbSiftChecker:
 
     def __detect(self, scene, target, mask, method):
         if method == 'orb':
-            detector = cv2.ORB_create(nfeatures=3000, edgeThreshold=15)
+            # 작은 합성 물체와 원본 참조 이미지의 크기 차이를 더 넓게 탐색한다.
+            # 패치를 줄이면 매칭이 감소해 31px을 유지하고 FAST 임계값만 낮춘다.
+            detector = cv2.ORB_create(
+                nfeatures=3000,
+                scaleFactor=1.2,
+                nlevels=16,
+                edgeThreshold=15,
+                patchSize=31,
+                fastThreshold=10,
+            )
             norm = cv2.NORM_HAMMING
         elif method == 'sift':
             if not hasattr(cv2, 'SIFT_create'):
@@ -29,7 +38,7 @@ class OrbSiftChecker:
             detector = cv2.SIFT_create(nfeatures=3000)
             norm = cv2.NORM_L2
         else:
-            raise ValueError("method는 orb, sift, auto 중 하나여야 합니다.")
+            raise ValueError("method는 orb, sift, orb/sift 중 하나여야 합니다.")
         kt, dt = detector.detectAndCompute(target, mask)
         ks, ds = detector.detectAndCompute(scene, None)
         if dt is None or ds is None or len(kt) < 8 or len(ks) < 8:
@@ -76,15 +85,15 @@ class OrbSiftChecker:
         return [(int(x1), int(y1), int(x2), int(y2))]
 
 
-    def detect(self, image, target, *, method='auto'):
+    def detect(self, image, target, *, method='orb/sift'):
         """대상 하나의 후보 박스를 반환한다. 방법별 최대 한 개, 미검출은 [].
 
-        auto는 ORB와 SIFT를 모두 실행하고 중복 박스를 제거한다. 미검출은 인간 난이도 보장이 아니다.
+        orb/sift는 ORB와 SIFT를 모두 실행하고 중복 박스를 제거한다. 미검출은 인간 난이도 보장이 아니다.
         BGRA 대상은 알파가 0인 영역을 제외하고 투명 여백도 잘라낸다.
         x2/y2는 슬라이스 끝 좌표이며 정답 여부는 생성기가 판단한다.
         """
-        if method not in ('auto', 'orb', 'sift'):
-            raise ValueError('method는 auto, orb, sift 중 하나여야 합니다.')
+        if method not in ('orb/sift', 'orb', 'sift'):
+            raise ValueError('method는 orb/sift, orb, sift 중 하나여야 합니다.')
         scene = self.__preprocess_image(image)
         gray = self.__preprocess_image(target)
         mask = (np.where(target[:,:,3] > 0, 255, 0).astype(np.uint8)
@@ -97,11 +106,11 @@ class OrbSiftChecker:
         mask = mask[y:y+h, x:x+w].copy()
         # 투명 픽셀의 임의 RGB 값이 기술자에 영향을 주지 않도록 고정한다.
         gray[mask == 0] = 0
-        methods = ('orb', 'sift') if method == 'auto' else (method,)
+        methods = ('orb', 'sift') if method == 'orb/sift' else (method,)
         all_boxes = []
 
         for current in methods:
-            if current == 'sift' and method == 'auto' and not hasattr(cv2, 'SIFT_create'):
+            if current == 'sift' and method == 'orb/sift' and not hasattr(cv2, 'SIFT_create'):
                 continue
 
             boxes = self.__detect(scene, gray, mask, current)

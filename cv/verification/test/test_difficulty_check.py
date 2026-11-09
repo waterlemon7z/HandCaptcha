@@ -17,7 +17,7 @@ def test_owlv2_loads_on_selection_and_is_reused():
         model.return_value.detect.assert_called_with(image, target)
 
 
-@pytest.mark.parametrize("method", ["auto", "orb", "sift"])
+@pytest.mark.parametrize("method", ["orb/sift", "orb", "sift"])
 def test_feature_methods_do_not_load_owlv2(method):
     with patch("cv.verification.difficulty_check.Owlv2Checker") as model:
         checker = DifficultyCheck()

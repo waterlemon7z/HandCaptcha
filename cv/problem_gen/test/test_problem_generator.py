@@ -10,7 +10,7 @@ W, H = OUTPUT_SIZE
 EMPTY = {"correct": False, "answer_box": None, "answer_mask": None}
 
 
-@pytest.mark.parametrize("method", ["auto", "orb", "sift", "owlv2"])
+@pytest.mark.parametrize("method", ["orb/sift", "orb", "sift", "owlv2"])
 def test_selected_verification_method_reaches_checker(asset_dir, method):
     class Checker:
         def __init__(self):

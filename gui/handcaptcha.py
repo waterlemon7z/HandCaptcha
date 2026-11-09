@@ -200,7 +200,7 @@ class Ui_MainWindow(object):
         self.verificationCombo = QComboBox(self.footerWidget)
         self.verificationCombo.setObjectName(u"verificationCombo")
         self.verificationCombo.setMinimumSize(QSize(120, 36))
-        self.verificationCombo.addItem("ORB/SIFT", "auto")
+        self.verificationCombo.addItem("ORB/SIFT", "orb/sift")
         self.verificationCombo.addItem("ORB", "orb")
         self.verificationCombo.addItem("SIFT", "sift")
         self.verificationCombo.addItem("OWLv2", "owlv2")

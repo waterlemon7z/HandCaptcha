@@ -213,7 +213,7 @@ def main():
     rows = []
     results = {
         method: {ratio: [] for ratio in OCCLUSION_RATIOS}
-        for method in (*METHODS, "auto")
+        for method in (*METHODS, "orb/sift")
     }
 
     for index in range(NUM_SAMPLES):
@@ -258,7 +258,7 @@ def main():
                 method: checker.difficult_check(image, target, method=method)
                 for method in METHODS
             }
-            boxes_by_method["auto"] = list(dict.fromkeys(
+            boxes_by_method["orb/sift"] = list(dict.fromkeys(
                 box for method in METHODS for box in boxes_by_method[method]
             ))
             percent = round(ratio * 100)
@@ -363,7 +363,7 @@ def main():
     print("\n===== 조건별 결과 =====")
 
     for method, method_results in results.items():
-        label = "ORB 또는 SIFT" if method == "auto" else method.upper()
+        label = "ORB 또는 SIFT" if method == "orb/sift" else method.upper()
         print(f"\n[{label}]")
         baseline = method_results[0.0]
 

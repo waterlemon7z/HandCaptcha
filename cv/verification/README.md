@@ -31,7 +31,7 @@ checker = DifficultyCheck()
 
 # image: 문제 이미지 NumPy 배열
 # target: 검출 대상 이미지 NumPy 배열
-boxes = checker.difficult_check(image, target, method="auto")
+boxes = checker.difficult_check(image, target, method="orb/sift")
 
 for x1, y1, x2, y2 in boxes:
     detected_region = image[y1:y2, x1:x2]
@@ -53,14 +53,14 @@ generator = ProblemGenerator(validator=checker.difficult_check)
 ## 입력과 출력
 
 ```python
-checker.difficult_check(image, target, *, method="auto")
+checker.difficult_check(image, target, *, method="orb/sift")
 ```
 
 | 인자 | 설명 |
 | --- | --- |
 | `image` | 검출 대상이 포함된 문제 이미지 |
 | `target` | 찾으려는 대상 이미지 |
-| `method` | `"auto"`, `"orb"`, `"sift"` 중 선택. 기본값은 `"auto"` |
+| `method` | `"orb/sift"`, `"orb"`, `"sift"` 중 선택. 기본값은 `"orb/sift"` |
 
 두 이미지는 비어 있지 않은 `np.ndarray`이며, dtype은 `np.uint8`이어야 합니다.
 
@@ -83,7 +83,7 @@ BGR/BGRA 이미지는 흑백으로 변환하여 처리합니다. BGRA **대상 �
 - `(x1, y1)`은 좌상단, `(x2, y2)`는 우하단 끝 좌표입니다.
 - `x2`, `y2`는 NumPy 슬라이싱에서 포함되지 않는 끝 좌표입니다.
 - 좌표는 문제 이미지 경계 안으로 제한됩니다.
-- 각 검출 방법은 최대 1개의 박스를 반환합니다. 현재 `auto` 구현은 ORB와 SIFT의 결과를 합쳐 최대 2개를 반환할 수 있습니다.
+- 각 검출 방법은 최대 1개의 박스를 반환합니다. 현재 `orb/sift` 구현은 ORB와 SIFT의 결과를 합쳐 최대 2개를 반환할 수 있습니다.
 - 좌표가 완전히 같은 박스만 중복 제거합니다. 겹치는 박스를 병합하는 NMS는 적용하지 않습니다.
 
 ## 검출 모드
@@ -92,7 +92,7 @@ BGR/BGRA 이미지는 흑백으로 변환하여 처리합니다. BGRA **대상 �
 | --- | --- |
 | `orb` | ORB로만 검출 |
 | `sift` | SIFT로만 검출. SIFT 미지원 시 `RuntimeError` 발생 |
-| `auto` | ORB 실행 후 SIFT도 실행하고 결과를 합침. SIFT 미지원 시 ORB 결과만 반환 |
+| `orb/sift` | ORB 실행 후 SIFT도 실행하고 결과를 합침. SIFT 미지원 시 ORB 결과만 반환 |
 
 **코드 주석과 현재 동작의 차이:** 메서드 설명에는 “ORB 미검출 시 SIFT 시도”, “최대 한 개의 박스”로 적혀 있지만, 현재 반복문에는 ORB 성공 후 종료하는 처리가 없습니다. 이 문서는 실제 구현을 기준으로 설명합니다.
 
@@ -122,7 +122,7 @@ BGR/BGRA 이미지는 흑백으로 변환하여 처리합니다. BGRA **대상 �
 
 | 항목 | 기준 |
 | --- | --- |
-| ORB 설정 | `nfeatures=3000`, `edgeThreshold=15` |
+| ORB 설정 | `nfeatures=3000`, `scaleFactor=1.2`, `nlevels=16`, `edgeThreshold=15`, `patchSize=31`, `fastThreshold=10` |
 | SIFT 설정 | `nfeatures=3000` |
 | 매칭 거리 | ORB: Hamming / SIFT: L2 |
 | 최소 특징점 수 | 대상과 문제 이미지 각각 8개 |
@@ -134,6 +134,16 @@ BGR/BGRA 이미지는 흑백으로 변환하여 처리합니다. BGRA **대상 �
 | 변환 다각형 면적 | 16픽셀² 이상, 문제 이미지 면적 이하 |
 
 호모그래피가 유효하지 않거나, 원근 변환의 무한대 경계를 가로지르거나, 변환 다각형이 볼록하지 않은 경우에도 해당 검출을 거부합니다.
+
+### 작은 대상에 대한 ORB 설정 조정
+
+피라미드 단계는 8→16으로 늘려 원본 참조 이미지와 작은 합성 물체 사이의 크기 차이를 더 넓게 탐색합니다.
+FAST 임계값은 20→10으로 낮춰 대비가 약한 특징점도 후보로 확보합니다.
+`scaleFactor=1.2`와 `patchSize=31`은 유지합니다. 더 촘촘한 피라미드와 21·15px 패치도 비교했지만 탐색 표본에서는 최종 설정보다 정답 검출이 적었습니다.
+매칭 수·인라이어·IoU 기준은 변경하지 않았습니다. SIFT 설정도 동일합니다.
+
+별도 seed 100개에서는 정답 검출이 6→7개로 소폭 증가했습니다. 큰 개선이나 일반화 성능이 입증된 결과는 아닙니다.
+설정별 탐색 및 검증 기록은 [ORB 설정 비교](../../docs/orb_tuning/README.md)를 참고하세요.
 
 ## 예외 및 미검출 처리
 

@@ -9,7 +9,7 @@ from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from backend.bot_detection import detector
 from cv.hand_tracking.hand_tracker import HandTracker, get_stop_box
 from cv.problem_gen import ProblemGenerator
-from logger import DEBUG
+from logger import DEBUG, INFO
 
 
 class TaskWorker(QObject):
@@ -124,7 +124,7 @@ class TaskWorker(QObject):
 
     @Slot(int)
     def generate(self, request_id):
-        self.generate_with_method(request_id, "auto")
+        self.generate_with_method(request_id, "orb/sift")
 
     @Slot(int, str)
     def generate_with_method(self, request_id, verification_method):
@@ -145,6 +145,7 @@ class TaskWorker(QObject):
                 self.tracker.set_images(image, small)
                 with self._frame_lock:
                     self._latest_frame = None
+                INFO('캡챠 이미지 준비 됨')
                 self.captcha_ready.emit(request_id, image.copy(), small.copy())
         except Exception as exc:
             self.error_occurred.emit(request_id, f"문제생성 오류: {exc}")

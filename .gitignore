@@ -223,8 +223,9 @@ __marimo__/
 
 # 진위검출: 사람 손 녹화 (웹캠 crop 포함, 로컬에만 보관)
 backend/bot_detection/test/data/human/
-# 진위검출: 합성 봇 재료 사진·생성 결과 (웹캠 이미지 포함)
-backend/bot_detection/test/data/synth/
+# 진위검출: 합성 봇 생성 결과 (웹캠 이미지 포함). 재료 사진 source/는 봇 시연 영상을 만들 수 있게 포함
+backend/bot_detection/test/data/synth/*
+!backend/bot_detection/test/data/synth/source/
 # 진위검출: 개인용 예상 Q&A
 backend/bot_detection/qna.md
 # 진위검출 CNN: 캐글 결과(데이터·가중치)

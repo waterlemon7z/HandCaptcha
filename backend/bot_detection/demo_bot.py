@@ -29,8 +29,8 @@ import numpy as np
 
 from backend.bot_detection import detector
 from backend.bot_detection.mock import min_jerk
-from backend.bot_detection.synth import (CAM_H, CAM_W, FPS, HAND_PX, SOURCE_DIR, cut_sprite, detectable,
-                                         load_backgrounds, paste, read_image, smooth_noise)
+from backend.bot_detection.synth import (CAM_H, CAM_W, FPS, HAND_PX, SOURCE_DIR, cut_sprite, detect_landmarks,
+                                         detectable, load_backgrounds, paste, read_image, smooth_noise)
 from cv.hand_tracking.hand_tracker import STATE_DONE, HandTracker, get_stop_box
 
 BOT_VIDEO_DIR = Path(__file__).resolve().parents[3]   # 레포 바깥 폴더 (main.py의 BOT_VIDEO_DIR과 같은 곳)
@@ -56,8 +56,17 @@ def answer_center(seed: int, method: str) -> tuple[np.ndarray, np.ndarray, np.nd
     return image, cv2.cvtColor(target, cv2.COLOR_BGRA2BGR), center, box
 
 
+def fist_shift(fist, point, target) -> np.ndarray:
+    """주먹 → 검지로 바뀔 때 손목이 제자리에 있도록 주먹을 옮길 거리.
+    둘 다 검지 끝 기준으로 붙이면 사진이 바뀌는 순간 손 전체가 점프해서 손 인식이 한 프레임 놓치고,
+    그러면 시작 준비가 풀려 기록이 시작되지 않는다 (재료 사진에 따라 발생)."""
+    fw, pw = detect_landmarks(fist.image)[0], detect_landmarks(point.image)[0]     # 0 = 손목
+    return (pw - point.anchor) * (target / point.hand) - (fw - fist.anchor) * (target / fist.hand)
+
+
 def make_cycle(goal, bg, fist, point, target, rng, level) -> list[np.ndarray]:
     """한 사이클 프레임 (앱이 보는 방향, 반전 전). goal = 문제 이미지 좌표 = 카메라 좌표 (둘 다 1280×720)."""
+    shift = fist_shift(fist, point, target)
     lo, hi = MARGIN, np.array([CAM_W, CAM_H]) - MARGIN
     for _ in range(1000):
         start = rng.uniform(lo, hi)
@@ -81,7 +90,7 @@ def make_cycle(goal, bg, fist, point, target, rng, level) -> list[np.ndarray]:
     frames = [bg.copy() for _ in range(OFF_FRAMES)]
     for i in range(m):
         if i < FIST_FRAMES:
-            f = paste(bg, fist, path[i], 0.0, target / fist.hand)
+            f = paste(bg, fist, path[i] + shift, 0.0, target / fist.hand)
         else:
             f = paste(bg, point, path[i], angles[i], target / point.hand * scales[i])
         if level in ("S3", "S4"):

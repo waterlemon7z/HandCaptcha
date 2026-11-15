@@ -11,7 +11,7 @@
 3. 저장한 영상을 다시 읽어 앱과 똑같이 손 인식 → 정답 판정 → 진위 검출까지 돌려 본다 (미리 검증)
 
 앱의 Camera는 읽은 프레임을 좌우 반전하므로, 영상에는 반전한 프레임을 저장한다.
-영상은 레포 바깥 폴더(main.py의 BOT_VIDEO_DIR)에 bot_<seed>.avi로 저장한다 (웹캠 영상이라 git에 안 넣음).
+영상은 레포 안 bot_videos/ 폴더(main.py의 BOT_VIDEO_DIR)에 bot_<seed>.avi로 저장한다 (웹캠 영상이라 git에 안 넣음).
 
 실행 (레포 루트, .venv):
     python -m backend.bot_detection.demo_bot --seed 1234
@@ -33,7 +33,7 @@ from backend.bot_detection.synth import (CAM_H, CAM_W, FPS, HAND_PX, SOURCE_DIR,
                                          detectable, load_backgrounds, paste, read_image, smooth_noise)
 from cv.hand_tracking.hand_tracker import STATE_DONE, HandTracker, get_stop_box
 
-BOT_VIDEO_DIR = Path(__file__).resolve().parents[3]   # 레포 바깥 폴더 (main.py의 BOT_VIDEO_DIR과 같은 곳)
+BOT_VIDEO_DIR = Path(__file__).resolve().parents[2] / "bot_videos"   # 레포 안 bot_videos/ (main.py의 BOT_VIDEO_DIR과 같은 곳)
 
 OFF_FRAMES = 15         # 사이클 처음 손 없는 구간 (이전 사이클 기록이 끊기게)
 FIST_FRAMES = 20        # 주먹 보여 주는 프레임 (앱은 프레임을 건너뛸 수 있어서 synth보다 길게)
@@ -152,7 +152,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=1234, help="문제 시드 (main.py --bot과 같게)")
     ap.add_argument("--method", default="orb/sift", help="검수기 (앱에서 고른 것과 같게, 기본 orb/sift)")
     ap.add_argument("--level", default="S4", choices=("S1", "S2", "S3", "S4"), help="봇 종류 (기본 S4: 회전·확대·노이즈)")
-    ap.add_argument("--out", default=None, help="출력 영상 (기본: 레포 바깥 폴더/bot_<seed>.avi)")
+    ap.add_argument("--out", default=None, help="출력 영상 (기본: 레포 안 bot_videos/bot_<seed>.avi)")
     args = ap.parse_args()
     out = Path(args.out) if args.out else BOT_VIDEO_DIR / f"bot_{args.seed}.avi"
 

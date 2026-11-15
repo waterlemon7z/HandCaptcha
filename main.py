@@ -15,8 +15,8 @@ from gui.signal import HandCaptchaUI
 from cv.verification.difficulty_check import DifficultyCheck
 from logger import INFO
 
-# 봇 시연 영상 폴더 (레포 바깥). backend/bot_detection/demo_bot.py가 여기에 bot_<seed>.avi로 저장한다
-BOT_VIDEO_DIR = Path(__file__).resolve().parent.parent
+# 봇 시연 영상 폴더 (레포 안 bot_videos/, git 제외). backend/bot_detection/demo_bot.py가 여기에 bot_<seed>.avi로 저장한다
+BOT_VIDEO_DIR = Path(__file__).resolve().parent / "bot_videos"
 
 
 class LoopVideo:

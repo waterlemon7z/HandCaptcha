@@ -228,6 +228,8 @@ backend/bot_detection/test/data/synth/*
 !backend/bot_detection/test/data/synth/source/
 # 진위검출: 개인용 예상 Q&A
 backend/bot_detection/qna.md
+# 진위검출: 봇 시연 영상 (demo_bot.py가 생성, 웹캠 영상이라 제외)
+/bot_videos/
 # 진위검출 CNN: 캐글 결과(데이터·가중치)
 backend/bot_detection/cnn/*.npz
 backend/bot_detection/cnn/*.pt
